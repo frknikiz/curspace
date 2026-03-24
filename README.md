@@ -41,7 +41,7 @@ Download the binary from the [releases page](https://github.com/frknikiz/curspac
 ### Homebrew (macOS)
 
 ```bash
-brew tap frknikiz/curspace
+brew tap frknikiz/curspace https://github.com/frknikiz/curspace
 brew install curspace
 ```
 
@@ -158,7 +158,7 @@ git push origin v1.0.0
 Homebrew formula updates are published to this repository, so users can install with:
 
 ```bash
-brew tap frknikiz/curspace
+brew tap frknikiz/curspace https://github.com/frknikiz/curspace
 brew install curspace
 ```
 
