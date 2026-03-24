@@ -1,0 +1,6 @@
+version: "2"
+
+run:
+  go: "1.26.0"
+  relative-path-mode: gomod
+  modules-download-mode: readonly
