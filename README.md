@@ -41,7 +41,7 @@ Download the binary from the [releases page](https://github.com/frknikiz/curspac
 ### Homebrew (macOS)
 
 ```bash
-brew tap frknikiz/tap
+brew tap frknikiz/curspace
 brew install curspace
 ```
 
@@ -153,6 +153,13 @@ Releases are automated with [GoReleaser](https://goreleaser.com/) via GitHub Act
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
+```
+
+Homebrew formula updates are published to this repository, so users can install with:
+
+```bash
+brew tap frknikiz/curspace
+brew install curspace
 ```
 
 ## License
