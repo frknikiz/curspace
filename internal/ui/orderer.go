@@ -112,14 +112,14 @@ func (m OrdererModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ensureVisible()
 			}
 
-		case "ctrl+up", "ctrl+k":
+		case "shift+up", "K":
 			if m.cursor > 0 {
 				m.items[m.cursor], m.items[m.cursor-1] = m.items[m.cursor-1], m.items[m.cursor]
 				m.cursor--
 				m.ensureVisible()
 			}
 
-		case "ctrl+down", "ctrl+j":
+		case "shift+down", "J":
 			if m.cursor < len(m.items)-1 {
 				m.items[m.cursor], m.items[m.cursor+1] = m.items[m.cursor+1], m.items[m.cursor]
 				m.cursor++
@@ -155,7 +155,7 @@ func (m OrdererModel) View() string {
 	s = append(s, ordTitleStyle.Render(" CURSPACE  Arrange Projects "))
 	s = append(s, "")
 	s = append(s, ordHintStyle.Render("  The first project becomes the primary workspace folder."))
-	s = append(s, ordHintStyle.Render("  Use ctrl+↑/↓ to move items, ↵ to confirm."))
+	s = append(s, ordHintStyle.Render("  Use shift+↑/↓ to move items, ↵ to confirm."))
 	s = append(s, "")
 
 	if len(m.items) == 0 {
@@ -208,7 +208,7 @@ func (m OrdererModel) View() string {
 	s = append(s, "")
 	items := []struct{ key, desc string }{
 		{"↑↓", "navigate"},
-		{"ctrl+↑↓", "move"},
+		{"⇧↑↓", "move"},
 		{"↵", "confirm"},
 		{"esc", "cancel"},
 	}

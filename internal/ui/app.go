@@ -740,7 +740,7 @@ func (m AppModel) updateOrdering(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ensureOrderVisible()
 		}
 
-	case "ctrl+up", "ctrl+k":
+	case "shift+up", "K":
 		if m.orderCursor > 0 {
 			m.selectedProjects[m.orderCursor], m.selectedProjects[m.orderCursor-1] =
 				m.selectedProjects[m.orderCursor-1], m.selectedProjects[m.orderCursor]
@@ -748,7 +748,7 @@ func (m AppModel) updateOrdering(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ensureOrderVisible()
 		}
 
-	case "ctrl+down", "ctrl+j":
+	case "shift+down", "J":
 		if m.orderCursor < len(m.selectedProjects)-1 {
 			m.selectedProjects[m.orderCursor], m.selectedProjects[m.orderCursor+1] =
 				m.selectedProjects[m.orderCursor+1], m.selectedProjects[m.orderCursor]
@@ -776,7 +776,7 @@ func (m AppModel) renderOrdering() string {
 	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("arrange projects"))
 	s = append(s, "")
 	s = append(s, "  "+ordHintStyle.Render("The first project becomes the primary workspace folder."))
-	s = append(s, "  "+ordHintStyle.Render("Use ctrl+↑/↓ to move items, ↵ to confirm."))
+	s = append(s, "  "+ordHintStyle.Render("Use shift+↑/↓ to move items, ↵ to confirm."))
 	s = append(s, "")
 
 	maxVis := max(5, m.height-14)
@@ -825,7 +825,7 @@ func (m AppModel) renderOrdering() string {
 	s = append(s, "")
 	items := []struct{ key, desc string }{
 		{"↑↓", "navigate"},
-		{"ctrl+↑↓", "move"},
+		{"⇧↑↓", "move"},
 		{"↵", "confirm"},
 		{"esc", "back"},
 	}

@@ -138,7 +138,7 @@ curspace workspace rename <old> <new>      # rename a workspace
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Navigate |
-| `Ctrl+↑` / `Ctrl+↓` | Move project up / down |
+| `Shift+↑` / `Shift+↓` | Move project up / down |
 | `Enter` | Confirm order |
 | `Esc` | Back to selector |
 
