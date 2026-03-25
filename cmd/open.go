@@ -83,6 +83,17 @@ var openCmd = &cobra.Command{
 
 		fmt.Printf("\n%s Selected %d project(s)\n\n", successStyle.Render("✓"), len(selected))
 
+		ordered, err := ui.RunOrderer(selected)
+		if err != nil {
+			return fmt.Errorf("project ordering: %w", err)
+		}
+		if ordered == nil {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+
+		fmt.Printf("%s Project order confirmed\n\n", successStyle.Render("✓"))
+
 		wsName, err := ui.RunPrompt("my-workspace")
 		if err != nil {
 			return fmt.Errorf("workspace name input: %w", err)
@@ -92,8 +103,8 @@ var openCmd = &cobra.Command{
 			return nil
 		}
 
-		folders := make([]workspace.WorkspaceFolder, len(selected))
-		for i, p := range selected {
+		folders := make([]workspace.WorkspaceFolder, len(ordered))
+		for i, p := range ordered {
 			folders[i] = workspace.WorkspaceFolder{
 				Name: p.Name,
 				Path: p.Path,

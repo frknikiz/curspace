@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -29,6 +30,7 @@ const (
 	viewMain     appView = iota // workspace dashboard
 	viewScanning                // spinner while scanning
 	viewSelector                // project multi-select
+	viewOrdering                // drag-to-reorder selected projects
 	viewNaming                  // workspace name input
 	viewAddRoot                 // add root directory input
 )
@@ -243,6 +245,10 @@ type AppModel struct {
 	search       string
 	selScrollTop int
 
+	// ordering
+	orderCursor    int
+	orderScrollTop int
+
 	// naming
 	nameInput        textinput.Model
 	selectedProjects []scanner.Project
@@ -432,6 +438,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateScanning(msg)
 	case viewSelector:
 		return m.updateSelector(msg)
+	case viewOrdering:
+		return m.updateOrdering(msg)
 	case viewNaming:
 		return m.updateNaming(msg)
 	case viewAddRoot:
@@ -615,11 +623,13 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for idx := range m.selected {
 				m.selectedProjects = append(m.selectedProjects, m.projects[idx])
 			}
-			ti := newStyledInput("my-workspace")
-			ti.Focus()
-			m.nameInput = ti
-			m.view = viewNaming
-			return m, textinput.Blink
+			slices.SortFunc(m.selectedProjects, func(a, b scanner.Project) int {
+				return cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+			})
+			m.orderCursor = 0
+			m.orderScrollTop = 0
+			m.view = viewOrdering
+			return m, nil
 		}
 
 	case "up":
@@ -694,6 +704,136 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// ── Ordering view ─────────────────────────────────────────────────
+
+func (m AppModel) updateOrdering(msg tea.Msg) (tea.Model, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	switch km.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+
+	case "esc":
+		m.view = viewSelector
+		return m, nil
+
+	case "enter":
+		ti := newStyledInput("my-workspace")
+		ti.Focus()
+		m.nameInput = ti
+		m.view = viewNaming
+		return m, textinput.Blink
+
+	case "up", "k":
+		if m.orderCursor > 0 {
+			m.orderCursor--
+			m.ensureOrderVisible()
+		}
+
+	case "down", "j":
+		if m.orderCursor < len(m.selectedProjects)-1 {
+			m.orderCursor++
+			m.ensureOrderVisible()
+		}
+
+	case "ctrl+up", "ctrl+k":
+		if m.orderCursor > 0 {
+			m.selectedProjects[m.orderCursor], m.selectedProjects[m.orderCursor-1] =
+				m.selectedProjects[m.orderCursor-1], m.selectedProjects[m.orderCursor]
+			m.orderCursor--
+			m.ensureOrderVisible()
+		}
+
+	case "ctrl+down", "ctrl+j":
+		if m.orderCursor < len(m.selectedProjects)-1 {
+			m.selectedProjects[m.orderCursor], m.selectedProjects[m.orderCursor+1] =
+				m.selectedProjects[m.orderCursor+1], m.selectedProjects[m.orderCursor]
+			m.orderCursor++
+			m.ensureOrderVisible()
+		}
+	}
+
+	return m, nil
+}
+
+func (m *AppModel) ensureOrderVisible() {
+	maxVis := max(5, m.height-14)
+	if m.orderCursor < m.orderScrollTop {
+		m.orderScrollTop = m.orderCursor
+	}
+	if m.orderCursor >= m.orderScrollTop+maxVis {
+		m.orderScrollTop = m.orderCursor - maxVis + 1
+	}
+}
+
+func (m AppModel) renderOrdering() string {
+	var s []string
+
+	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("arrange projects"))
+	s = append(s, "")
+	s = append(s, "  "+ordHintStyle.Render("The first project becomes the primary workspace folder."))
+	s = append(s, "  "+ordHintStyle.Render("Use ctrl+↑/↓ to move items, ↵ to confirm."))
+	s = append(s, "")
+
+	maxVis := max(5, m.height-14)
+	end := min(m.orderScrollTop+maxVis, len(m.selectedProjects))
+
+	if m.orderScrollTop > 0 {
+		s = append(s, selScrollStyle.Render(fmt.Sprintf("    ▲ %d more", m.orderScrollTop)))
+	}
+
+	for i := m.orderScrollTop; i < end; i++ {
+		p := m.selectedProjects[i]
+		isActive := i == m.orderCursor
+
+		cur := "  "
+		if isActive {
+			cur = appCursorStyle.Render("▸ ")
+		}
+
+		numStyle := ordNumberStyle
+		if isActive {
+			numStyle = ordActiveNumberStyle
+		}
+		num := numStyle.Render(fmt.Sprintf("%d.", i+1))
+
+		name := ordNameStyle.Render(p.Name)
+		if isActive {
+			name = ordActiveNameStyle.Render(p.Name)
+		}
+
+		tag := renderProjectTypeTag(p.Type)
+
+		maxLen := 50
+		if m.width > 0 {
+			maxLen = max(20, m.width-len(p.Name)-len(string(p.Type))-28)
+		}
+		pathStr := ordPathStyle.Render(truncatePath(p.Path, maxLen))
+
+		s = append(s, fmt.Sprintf("  %s%s %s %s  %s", cur, num, name, tag, pathStr))
+	}
+
+	remaining := len(m.selectedProjects) - end
+	if remaining > 0 {
+		s = append(s, selScrollStyle.Render(fmt.Sprintf("    ▼ %d more", remaining)))
+	}
+
+	s = append(s, "")
+	items := []struct{ key, desc string }{
+		{"↑↓", "navigate"},
+		{"ctrl+↑↓", "move"},
+		{"↵", "confirm"},
+		{"esc", "back"},
+	}
+	s = append(s, "  "+renderHelp(items))
+
+	return appPadding.Render(strings.Join(s, "\n"))
+}
+
 // ── Naming view ───────────────────────────────────────────────────
 
 func (m AppModel) updateNaming(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -703,7 +843,7 @@ func (m AppModel) updateNaming(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case tea.KeyEsc:
-			m.view = viewSelector
+			m.view = viewOrdering
 			return m, nil
 		case tea.KeyEnter:
 			name := m.nameInput.Value()
@@ -789,6 +929,8 @@ func (m AppModel) View() string {
 		return m.renderScanning()
 	case viewSelector:
 		return m.renderSelector()
+	case viewOrdering:
+		return m.renderOrdering()
 	case viewNaming:
 		return m.renderNaming()
 	case viewAddRoot:
