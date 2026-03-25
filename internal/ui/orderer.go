@@ -48,10 +48,6 @@ var (
 	ordHintStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#A49FA5"))
 
-	ordMovingStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#04B575")).
-			Bold(true)
-
 	ordAppStyle = lipgloss.NewStyle().Padding(1, 2)
 )
 

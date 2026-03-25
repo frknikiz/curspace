@@ -1,118 +1,160 @@
-# Curspace
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/frknikiz/curspace?style=flat-square&color=7D56F4" alt="Release">
+  <img src="https://img.shields.io/github/license/frknikiz/curspace?style=flat-square" alt="License">
+  <img src="https://img.shields.io/github/actions/workflow/status/frknikiz/curspace/release.yml?style=flat-square&label=build" alt="Build">
+  <img src="https://img.shields.io/badge/go-%3E%3D1.23-00ADD8?style=flat-square&logo=go" alt="Go Version">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
+</p>
 
-Curspace is a terminal app that makes [Cursor IDE](https://cursor.sh) workspace management easier.
+<h1 align="center">curspace</h1>
 
-If you work across many repositories, Curspace helps you find projects quickly, select the ones you want in a TUI, turn
-them into a multi-root `.code-workspace`, and open that workspace directly in Cursor.
+<p align="center">
+  <strong>Terminal-first project discovery and workspace launcher for <a href="https://cursor.sh">Cursor IDE</a></strong>
+</p>
 
-Instead of manually browsing folders and building workspaces by hand, you add your project roots once and reuse the same
-fast flow whenever you need a new workspace.
+<p align="center">
+  Scan your filesystem for projects, pick what you need in a fast TUI,<br>
+  arrange the folder order, and open everything as a multi-root workspace in Cursor &mdash; in seconds.
+</p>
 
-## What It Does
+---
 
-- Scans your filesystem for projects under the roots you choose
-- Lets you filter and select multiple repositories from a terminal UI
-- Creates Cursor workspace files for the selected folders
-- Opens the workspace in Cursor immediately
-- Keeps saved workspaces easy to reopen, rename, and delete
+## Why?
+
+If you juggle dozens of repositories every day, creating multi-root workspaces by hand gets old fast. Curspace turns that into a single command:
+
+```
+curspace
+```
+
+It discovers every project under the directories you configure, presents them in a filterable list, lets you reorder them (the first folder becomes the primary workspace root), names the workspace, and opens it in Cursor.
 
 ## Features
 
-- **Project Discovery** — Recursively finds Go, Node, Java, Python, Rust, .NET, PHP, and Git projects
-- **Interactive TUI** — Filter, multi-select, rescan, and continue without leaving the terminal
-- **Fast Workspace Creation** — Create a Cursor workspace from selected projects in one flow
-- **Workspace Management** — List, reopen, rename, and delete saved `.code-workspace` files
-- **Path Autocomplete** — Autocomplete existing directories while adding scan roots
-- **Scan Caching** — Reuse previous discovery results for faster startup
-- **Cross-platform** — Works on macOS and Linux
+- **Auto-discovery** &mdash; Recursively detects Go, Node, Java, Python, Rust, .NET, PHP, and Git projects by their marker files.
+- **Interactive TUI** &mdash; Fuzzy filter, multi-select, rescan, and continue without leaving the terminal.
+- **Drag-to-reorder** &mdash; Arrange the selected projects before saving; the first item becomes the primary workspace folder.
+- **Instant open** &mdash; Creates a `.code-workspace` file and launches Cursor in one step.
+- **Workspace hub** &mdash; List, reopen, rename, and delete saved workspaces from the same TUI.
+- **Path autocomplete** &mdash; Tab-complete directories when adding scan roots.
+- **Scan caching** &mdash; Reuses previous discovery results for sub-second startup.
+- **Cross-platform** &mdash; macOS and Linux, `amd64` and `arm64`.
 
 ## Installation
 
-### From source
-
-```bash
-go install github.com/frknikiz/curspace@latest
-```
-
-### From release
-
-Download the binary from the [releases page](https://github.com/frknikiz/curspace/releases).
-
-### Homebrew (macOS / Linux)
+### Homebrew (recommended)
 
 ```bash
 brew tap frknikiz/curspace
 brew install curspace
 ```
 
-## Usage
-
-### Typical flow
-
-1. Add one or more root directories where your repositories live.
-2. Run `curspace open`.
-3. Filter and select projects in the TUI.
-4. Name the workspace and open it in Cursor.
-
-### Add project roots
+### Go install
 
 ```bash
+go install github.com/frknikiz/curspace@latest
+```
+
+### Binary download
+
+Grab the latest archive from the [Releases](https://github.com/frknikiz/curspace/releases) page, extract it, and place the binary on your `PATH`.
+
+## Quick Start
+
+```bash
+# 1. Tell curspace where your repos live
 curspace roots add ~/projects
 curspace roots add ~/work
-curspace roots list
+
+# 2. Launch the workspace hub
+curspace
 ```
 
-While adding a root in the TUI, `Tab` autocompletes existing directories.
+That's it. The hub scans your roots, shows discovered projects, and guides you through selection, ordering, and naming.
 
-### Scan for projects
+## Usage
+
+### Hub (default)
+
+Running `curspace` without arguments opens the interactive workspace hub where you can create new workspaces and manage existing ones.
+
+| Key | Action |
+|-----|--------|
+| `n` | New workspace (scan & select) |
+| `ctrl+r` | Force rescan from disk |
+| `Enter` | Open selected workspace in Cursor |
+| `d` | Delete workspace |
+| `r` | Rename workspace |
+| `a` | Add a new project root |
+| `q` | Quit |
+
+### Open (one-shot)
 
 ```bash
-curspace scan
+curspace open            # scan, select, order, name, open
+curspace open --refresh  # force rescan, bypass cache
 ```
 
-### Open workspace (main flow)
+### Project roots
 
 ```bash
-curspace open           # scan, select, name, open in Cursor
-curspace open --refresh # force rescan, bypass cache
+curspace roots add <path>      # add a scan root
+curspace roots remove <path>   # remove a scan root
+curspace roots list            # show all roots
 ```
 
-Inside the interactive TUI:
-
-- Press `n` to open the latest project catalog
-- Press `Ctrl+R` to force a fresh rescan
-- Use `Space` or `Tab` to select projects
-- Press `Enter` to continue
-
-### Manage workspaces
+### Scan
 
 ```bash
-curspace workspace list
-curspace workspace open my-workspace
-curspace workspace delete my-workspace
-curspace workspace rename old-name new-name
+curspace scan                  # scan and print discovered projects
 ```
 
-## Commands
+### Workspace management
 
-| Command                        | Description                                   |
-|--------------------------------|-----------------------------------------------|
-| `curspace`                     | Open the interactive workspace hub            |
-| `roots add <path>`             | Add a root directory for scanning             |
-| `roots remove <path>`          | Remove a root directory                       |
-| `roots list`                   | List configured root directories              |
-| `scan`                         | Scan roots and display discovered projects    |
-| `open`                         | Interactive flow: scan → select → name → open |
-| `workspace list`               | List saved workspaces                         |
-| `workspace open <name>`        | Open a workspace in Cursor                    |
-| `workspace delete <name>`      | Delete a workspace                            |
-| `workspace rename <old> <new>` | Rename a workspace                            |
+```bash
+curspace workspace list                    # list saved workspaces
+curspace workspace open <name>             # open in Cursor
+curspace workspace delete <name>           # delete workspace file
+curspace workspace rename <old> <new>      # rename a workspace
+```
+
+## Keyboard Reference
+
+### Project selector
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate |
+| `Space` / `Tab` | Toggle selection |
+| `Ctrl+A` | Select all visible |
+| `Ctrl+D` | Clear selection |
+| `Ctrl+R` | Rescan projects |
+| `Enter` | Continue with selection |
+| `Esc` | Clear filter / go back |
+| Type any text | Live filter by name, path, or type |
+
+### Project ordering
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate |
+| `Ctrl+↑` / `Ctrl+↓` | Move project up / down |
+| `Enter` | Confirm order |
+| `Esc` | Back to selector |
 
 ## Configuration
 
-Curspace stores its config in `~/.curspace/config.json` and saves generated workspaces under `~/.curspace/workspaces/`.
+All state lives under `~/.curspace/`:
 
-Example config:
+```
+~/.curspace/
+├── config.json                        # roots and settings
+└── workspaces/
+    ├── my-workspace.code-workspace    # generated workspace files
+    └── another.code-workspace
+```
+
+### `config.json`
 
 ```json
 {
@@ -124,44 +166,94 @@ Example config:
 }
 ```
 
+| Field | Default | Description |
+|-------|---------|-------------|
+| `roots` | `[]` | Directories to scan for projects |
+| `max_depth` | `10` | Maximum directory depth for recursive scanning |
+
 ## Supported Project Types
 
-| Type | Marker Files |
-|---|---|
+| Type | Detected by |
+|------|-------------|
 | Go | `go.mod` |
 | Node | `package.json` |
-| Java | `pom.xml`, `build.gradle` |
+| Java | `pom.xml`, `build.gradle`, `build.gradle.kts` |
 | Python | `requirements.txt`, `setup.py`, `pyproject.toml`, `Pipfile` |
 | Rust | `Cargo.toml` |
 | .NET | `*.csproj`, `*.fsproj`, `*.sln` |
 | PHP | `composer.json` |
+| Git | `.git` directory (fallback) |
+
+## Project Structure
+
+```
+curspace/
+├── main.go                    # entrypoint
+├── cmd/                       # CLI commands (Cobra)
+│   ├── root.go                # default hub command
+│   ├── open.go                # scan → select → order → name → open
+│   ├── scan.go                # standalone scan
+│   ├── roots.go               # root management
+│   └── workspace.go           # workspace CRUD
+├── internal/
+│   ├── ui/                    # TUI (Bubble Tea + Lip Gloss)
+│   │   ├── app.go             # hub application model
+│   │   ├── selector.go        # project multi-select
+│   │   ├── orderer.go         # project reorder
+│   │   ├── prompt.go          # text input prompt
+│   │   └── ...
+│   ├── workspace/             # .code-workspace read/write
+│   ├── scanner/               # filesystem project detection
+│   ├── discovery/             # scan + cache orchestration
+│   ├── cache/                 # scan result caching
+│   ├── config/                # ~/.curspace/config.json
+│   └── cursor/                # Cursor IDE launcher
+├── .goreleaser.yaml
+├── LICENSE
+└── README.md
+```
 
 ## Development
 
 ```bash
 git clone https://github.com/frknikiz/curspace.git
 cd curspace
+
+# build
 go build ./...
+
+# test
 go test ./...
+
+# vet
 go vet ./...
+
+# run locally
+go run . roots add ~/projects
+go run .
 ```
 
 ## Release
 
-Releases are automated with [GoReleaser](https://goreleaser.com/) via GitHub Actions. To create a release:
+Releases are automated via [GoReleaser](https://goreleaser.com/) and GitHub Actions.
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.x.x
+git push origin v1.x.x
 ```
 
-Homebrew formula updates are automatically published to the [homebrew-curspace](https://github.com/frknikiz/homebrew-curspace) tap repository, so users can install with:
+This builds cross-platform binaries, publishes a GitHub release, and updates the [Homebrew tap](https://github.com/frknikiz/homebrew-curspace) automatically.
 
-```bash
-brew tap frknikiz/curspace
-brew install curspace
-```
+## Contributing
+
+Contributions are welcome! Please open an issue first to discuss what you'd like to change.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-[MIT](LICENSE)
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.
