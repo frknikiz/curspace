@@ -19,10 +19,12 @@ archives:
 brews:
   - repository:
       owner: frknikiz
-      name: curspace
+      name: homebrew-curspace
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/frknikiz/curspace"
     description: "Terminal-first project discovery and workspace launcher for Cursor IDE"
     license: "MIT"
+    directory: Formula
 
 checksum:
   name_template: "checksums.txt"

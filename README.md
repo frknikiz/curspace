@@ -38,10 +38,10 @@ go install github.com/frknikiz/curspace@latest
 
 Download the binary from the [releases page](https://github.com/frknikiz/curspace/releases).
 
-### Homebrew (macOS)
+### Homebrew (macOS / Linux)
 
 ```bash
-brew tap frknikiz/curspace https://github.com/frknikiz/curspace
+brew tap frknikiz/curspace
 brew install curspace
 ```
 
@@ -155,10 +155,10 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-Homebrew formula updates are published to this repository, so users can install with:
+Homebrew formula updates are automatically published to the [homebrew-curspace](https://github.com/frknikiz/homebrew-curspace) tap repository, so users can install with:
 
 ```bash
-brew tap frknikiz/curspace https://github.com/frknikiz/curspace
+brew tap frknikiz/curspace
 brew install curspace
 ```
 
