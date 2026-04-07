@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/frknikiz/curspace/internal/scanner"
 )
 
 var (
@@ -44,6 +45,7 @@ var (
 
 type PromptModel struct {
 	textInput textinput.Model
+	projects  []scanner.Project
 	done      bool
 	cancelled bool
 }
@@ -63,7 +65,10 @@ func NewPromptModel(placeholder string) PromptModel {
 }
 
 func (m PromptModel) Value() string {
-	return m.textInput.Value()
+	if v := m.textInput.Value(); v != "" {
+		return v
+	}
+	return generateWorkspaceName(m.projects)
 }
 
 func (m PromptModel) Cancelled() bool {
@@ -82,10 +87,8 @@ func (m PromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelled = true
 			return m, tea.Quit
 		case tea.KeyEnter:
-			if m.textInput.Value() != "" {
-				m.done = true
-				return m, tea.Quit
-			}
+			m.done = true
+			return m, tea.Quit
 		}
 	}
 
@@ -105,17 +108,21 @@ func (m PromptModel) View() string {
 
 	box := promptBoxStyle.Render(fmt.Sprintf("%s\n\n%s", label, input))
 
+	hint := promptHelpStyle.Render("Press enter without a name to use the auto-generated one.")
+
 	help := promptHelpStyle.Render(
 		promptHelpKeyStyle.Render("enter") + promptHelpDescStyle.Render(" confirm") +
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#3C3C3C")).Render(" │ ") +
 			promptHelpKeyStyle.Render("esc") + promptHelpDescStyle.Render(" cancel"),
 	)
 
-	return promptAppStyle.Render(fmt.Sprintf("%s\n%s\n%s", title, box, help))
+	return promptAppStyle.Render(fmt.Sprintf("%s\n%s\n%s\n%s", title, box, hint, help))
 }
 
-func RunPrompt(placeholder string) (string, error) {
+func RunPrompt(projects []scanner.Project) (string, error) {
+	placeholder := generateWorkspaceName(projects)
 	model := NewPromptModel(placeholder)
+	model.projects = projects
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	result, err := p.Run()
 	if err != nil {

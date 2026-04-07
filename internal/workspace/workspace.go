@@ -138,6 +138,7 @@ func Delete(name string) error {
 type WorkspaceInfo struct {
 	Name        string
 	FolderCount int
+	Folders     []WorkspaceFolder
 	ModTime     time.Time
 }
 
@@ -170,17 +171,18 @@ func ListDetailed() ([]WorkspaceInfo, error) {
 
 		path := filepath.Join(dir, entry.Name())
 		data, err := os.ReadFile(path)
-		folderCount := 0
+		var folders []WorkspaceFolder
 		if err == nil {
 			var ws WorkspaceFile
 			if json.Unmarshal(data, &ws) == nil {
-				folderCount = len(ws.Folders)
+				folders = ws.Folders
 			}
 		}
 
 		infos = append(infos, WorkspaceInfo{
 			Name:        name,
-			FolderCount: folderCount,
+			FolderCount: len(folders),
+			Folders:     folders,
 			ModTime:     fileInfo.ModTime(),
 		})
 	}

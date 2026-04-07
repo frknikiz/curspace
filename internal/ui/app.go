@@ -113,6 +113,16 @@ var (
 				Foreground(lipgloss.Color("#7A7A7A")).
 				Italic(true)
 
+	appFolderNameStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#C8C8C8"))
+
+	appFolderPathStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#626262")).
+				Italic(true)
+
+	appFolderTreeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#4A4A4A"))
+
 	rootSuggestionStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#8F8F8F"))
 
@@ -228,6 +238,7 @@ type AppModel struct {
 	// main view
 	workspaces  []workspace.WorkspaceInfo
 	wsCursor    int
+	wsExpanded  map[int]bool
 	confirming  bool // delete confirmation
 	renaming    bool
 	renameInput textinput.Model
@@ -283,6 +294,7 @@ func NewAppModel(cfg AppConfig) AppModel {
 		openCursor: cfg.OpenCursor,
 		spinner:    s,
 		selected:   make(map[int]bool),
+		wsExpanded: make(map[int]bool),
 	}
 }
 
@@ -565,6 +577,15 @@ func (m AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			}
 
+		case "tab":
+			if len(m.workspaces) > 0 && m.wsCursor < len(m.workspaces) {
+				if m.wsExpanded[m.wsCursor] {
+					delete(m.wsExpanded, m.wsCursor)
+				} else {
+					m.wsExpanded[m.wsCursor] = true
+				}
+			}
+
 		case "a":
 			ti := newPathInput("~/projects")
 			ti.Focus()
@@ -768,7 +789,8 @@ func (m AppModel) updateOrdering(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		ti := newStyledInput("my-workspace")
+		autoName := generateWorkspaceName(m.selectedProjects)
+		ti := newStyledInput(autoName)
 		ti.Focus()
 		m.nameInput = ti
 		m.view = viewNaming
@@ -893,29 +915,30 @@ func (m AppModel) updateNaming(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyEnter:
 			name := m.nameInput.Value()
-			if name != "" {
-				folders := make([]workspace.WorkspaceFolder, len(m.selectedProjects))
-				for i, p := range m.selectedProjects {
-					folders[i] = workspace.WorkspaceFolder{Name: p.Name, Path: p.Path}
-				}
-				wsPath, err := workspace.Create(name, folders)
-				if err != nil {
-					m.statusMsg = fmt.Sprintf("Create failed: %v", err)
-					m.statusErr = true
-					m.view = viewMain
-					return m, loadWorkspacesCmd
-				}
-
-				if err := m.openCursor(wsPath); err != nil {
-					m.statusMsg = fmt.Sprintf("Created '%s', but Cursor failed: %v", name, err)
-					m.statusErr = true
-				} else {
-					m.statusMsg = fmt.Sprintf("Created and opened '%s' in Cursor", name)
-					m.statusErr = false
-				}
+			if name == "" {
+				name = generateWorkspaceName(m.selectedProjects)
+			}
+			folders := make([]workspace.WorkspaceFolder, len(m.selectedProjects))
+			for i, p := range m.selectedProjects {
+				folders[i] = workspace.WorkspaceFolder{Name: p.Name, Path: p.Path}
+			}
+			wsPath, err := workspace.Create(name, folders)
+			if err != nil {
+				m.statusMsg = fmt.Sprintf("Create failed: %v", err)
+				m.statusErr = true
 				m.view = viewMain
 				return m, loadWorkspacesCmd
 			}
+
+			if err := m.openCursor(wsPath); err != nil {
+				m.statusMsg = fmt.Sprintf("Created '%s', but Cursor failed: %v", name, err)
+				m.statusErr = true
+			} else {
+				m.statusMsg = fmt.Sprintf("Created and opened '%s' in Cursor", name)
+				m.statusErr = false
+			}
+			m.view = viewMain
+			return m, loadWorkspacesCmd
 		}
 	}
 
@@ -1016,10 +1039,16 @@ func (m AppModel) renderMain() string {
 		for i := scrollTop; i < end; i++ {
 			ws := m.workspaces[i]
 			isActive := i == m.wsCursor
+			isExpanded := m.wsExpanded[i]
 
 			cursor := "  "
 			if isActive {
 				cursor = appCursorStyle.Render("▸ ")
+			}
+
+			expandIcon := appFolderTreeStyle.Render("▶")
+			if isExpanded {
+				expandIcon = appFolderTreeStyle.Render("▼")
 			}
 
 			name := appNameStyle.Render(ws.Name)
@@ -1030,7 +1059,23 @@ func (m AppModel) renderMain() string {
 			detail := appDetailStyle.Render(fmt.Sprintf("%d folders", ws.FolderCount))
 			ago := appTimeStyle.Render(timeAgo(ws.ModTime))
 
-			s = append(s, fmt.Sprintf("  %s%s  %s  %s", cursor, name, detail, ago))
+			s = append(s, fmt.Sprintf("  %s%s %s  %s  %s", cursor, expandIcon, name, detail, ago))
+
+			if isExpanded && len(ws.Folders) > 0 {
+				for fi, folder := range ws.Folders {
+					tree := appFolderTreeStyle.Render("├─")
+					if fi == len(ws.Folders)-1 {
+						tree = appFolderTreeStyle.Render("└─")
+					}
+					fName := folder.Name
+					if fName == "" {
+						fName = filepath.Base(folder.Path)
+					}
+					maxLen := max(20, m.width-len(fName)-20)
+					fPath := appFolderPathStyle.Render(truncatePath(folder.Path, maxLen))
+					s = append(s, fmt.Sprintf("       %s %s  %s", tree, appFolderNameStyle.Render(fName), fPath))
+				}
+			}
 		}
 
 		remaining := len(m.workspaces) - end
@@ -1080,6 +1125,7 @@ func (m AppModel) renderMainHelp() string {
 	items := []struct{ key, desc string }{
 		{"n", "new workspace"},
 		{"o", "open project"},
+		{"tab", "expand"},
 		{"ctrl+r", "rescan"},
 		{"↵", "open"},
 		{"d", "delete"},
@@ -1247,6 +1293,7 @@ func (m AppModel) renderNaming() string {
 	s = append(s, "")
 	selInfo := appDetailStyle.Render(fmt.Sprintf("%d project(s) selected", len(m.selectedProjects)))
 	s = append(s, "  "+selInfo)
+	s = append(s, "  "+appMutedHintStyle.Render("Press enter without a name to use the auto-generated one."))
 
 	s = append(s, "")
 	items := []struct{ key, desc string }{
@@ -1384,6 +1431,37 @@ func (m *AppModel) ensureSelVisible() {
 
 func (m *AppModel) syncRootSuggestions() {
 	m.rootInput.SetSuggestions(pathSuggestions(m.rootInput.Value()))
+}
+
+func generateWorkspaceName(projects []scanner.Project) string {
+	if len(projects) == 0 {
+		return fmt.Sprintf("workspace-%d", time.Now().Unix())
+	}
+
+	sanitize := func(name string) string {
+		name = strings.ToLower(name)
+		name = strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				return r
+			}
+			return '-'
+		}, name)
+		name = strings.Trim(name, "-")
+		return name
+	}
+
+	switch len(projects) {
+	case 1:
+		return sanitize(projects[0].Name)
+	case 2:
+		return sanitize(projects[0].Name) + "-" + sanitize(projects[1].Name)
+	default:
+		return fmt.Sprintf("%s-%s-and-%d-more",
+			sanitize(projects[0].Name),
+			sanitize(projects[1].Name),
+			len(projects)-2,
+		)
+	}
 }
 
 func newStyledInput(placeholder string) textinput.Model {

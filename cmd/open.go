@@ -94,7 +94,7 @@ var openCmd = &cobra.Command{
 
 		fmt.Printf("%s Project order confirmed\n\n", successStyle.Render("✓"))
 
-		wsName, err := ui.RunPrompt("my-workspace")
+		wsName, err := ui.RunPrompt(ordered)
 		if err != nil {
 			return fmt.Errorf("workspace name input: %w", err)
 		}
