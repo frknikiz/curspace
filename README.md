@@ -34,6 +34,7 @@ It discovers every project under the directories you configure, presents them in
 - **Auto-discovery** &mdash; Recursively detects Go, Node, Java, Python, Rust, .NET, PHP, and Git projects by their marker files.
 - **Interactive TUI** &mdash; Fuzzy filter, multi-select, rescan, and continue without leaving the terminal.
 - **Drag-to-reorder** &mdash; Arrange the selected projects before saving; the first item becomes the primary workspace folder.
+- **Open single project** &mdash; Pick any discovered project and open it directly in Cursor, no workspace file needed.
 - **Instant open** &mdash; Creates a `.code-workspace` file and launches Cursor in one step.
 - **Workspace hub** &mdash; List, reopen, rename, and delete saved workspaces from the same TUI.
 - **Path autocomplete** &mdash; Tab-complete directories when adding scan roots.
@@ -81,6 +82,7 @@ Running `curspace` without arguments opens the interactive workspace hub where y
 | Key | Action |
 |-----|--------|
 | `n` | New workspace (scan & select) |
+| `o` | Open a single project directly in Cursor |
 | `ctrl+r` | Force rescan from disk |
 | `Enter` | Open selected workspace in Cursor |
 | `d` | Delete workspace |

@@ -212,6 +212,7 @@ type scanIntent struct {
 	forceRefresh          bool
 	preserveSearch        string
 	preserveSelectedPaths map[string]bool
+	directOpen            bool
 }
 
 type AppModel struct {
@@ -244,6 +245,9 @@ type AppModel struct {
 	selCursor    int
 	search       string
 	selScrollTop int
+
+	// direct open (single project, no workspace creation)
+	directOpen bool
 
 	// ordering
 	orderCursor    int
@@ -331,9 +335,31 @@ func (m *AppModel) startProjectSelection(forceRefresh bool) (tea.Model, tea.Cmd)
 		return m, nil
 	}
 
+	m.directOpen = false
 	m.scan = scanIntent{
 		returnView:   viewMain,
 		forceRefresh: forceRefresh,
+	}
+	return m, m.startScan()
+}
+
+func (m *AppModel) startDirectOpenSelection(forceRefresh bool) (tea.Model, tea.Cmd) {
+	if err := m.refreshConfig(); err != nil {
+		m.statusMsg = err.Error()
+		m.statusErr = true
+		return m, nil
+	}
+	if len(m.roots) == 0 {
+		m.statusMsg = "No project roots configured. Press 'a' to add one."
+		m.statusErr = true
+		return m, nil
+	}
+
+	m.directOpen = true
+	m.scan = scanIntent{
+		returnView:   viewMain,
+		forceRefresh: forceRefresh,
+		directOpen:   true,
 	}
 	return m, m.startScan()
 }
@@ -424,6 +450,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastScanSource = msg.result.Source
 		m.lastScanAt = msg.result.Timestamp
 		m.lastProjectCount = len(msg.result.Projects)
+		m.directOpen = m.scan.directOpen
 		m.initSelector()
 		m.restoreSelectorState()
 		m.view = viewSelector
@@ -498,6 +525,9 @@ func (m AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "n":
 			return m.startProjectSelection(false)
+
+		case "o":
+			return m.startDirectOpenSelection(false)
 
 		case "ctrl+r":
 			return m.startProjectSelection(true)
@@ -614,11 +644,27 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.search = ""
 			m.applyProjectFilter()
 		} else {
+			m.directOpen = false
 			m.view = viewMain
 		}
 
 	case "enter":
-		if len(m.selected) > 0 {
+		if m.directOpen {
+			if len(m.filtered) > 0 && m.selCursor < len(m.filtered) {
+				idx := m.filtered[m.selCursor]
+				p := m.projects[idx]
+				if err := m.openCursor(p.Path); err != nil {
+					m.statusMsg = fmt.Sprintf("Cursor: %v", err)
+					m.statusErr = true
+				} else {
+					m.statusMsg = fmt.Sprintf("Opened project '%s' in Cursor", p.Name)
+					m.statusErr = false
+				}
+				m.directOpen = false
+				m.view = viewMain
+				return m, nil
+			}
+		} else if len(m.selected) > 0 {
 			m.selectedProjects = nil
 			for idx := range m.selected {
 				m.selectedProjects = append(m.selectedProjects, m.projects[idx])
@@ -954,7 +1000,7 @@ func (m AppModel) renderMain() string {
 	s = append(s, appSectionStyle.Render(fmt.Sprintf("  Workspaces (%d)", len(m.workspaces))))
 
 	if len(m.workspaces) == 0 {
-		s = append(s, appEmptyStyle.Render("No workspaces yet. Press n to create one from discovered projects."))
+		s = append(s, appEmptyStyle.Render("No workspaces yet. Press n to create one, or o to open a single project."))
 	} else {
 		maxVisible := max(5, m.height-18)
 		scrollTop := 0
@@ -1032,7 +1078,8 @@ func (m AppModel) renderMain() string {
 
 func (m AppModel) renderMainHelp() string {
 	items := []struct{ key, desc string }{
-		{"n", "new"},
+		{"n", "new workspace"},
+		{"o", "open project"},
 		{"ctrl+r", "rescan"},
 		{"↵", "open"},
 		{"d", "delete"},
@@ -1074,7 +1121,11 @@ func (m AppModel) renderScanning() string {
 func (m AppModel) renderSelector() string {
 	var s []string
 
-	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("select projects"))
+	subtitle := "select projects"
+	if m.directOpen {
+		subtitle = "open project"
+	}
+	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render(subtitle))
 	s = append(s, "")
 	s = append(s, "  "+m.scanSummaryText())
 	s = append(s, "")
@@ -1087,9 +1138,14 @@ func (m AppModel) renderSelector() string {
 	}
 	s = append(s, selSearchBoxStyle.Render(searchContent))
 
-	selCount := selCountStyle.Render(fmt.Sprintf("%d selected", len(m.selected)))
-	totCount := selTotalStyle.Render(fmt.Sprintf("%d/%d projects", len(m.filtered), len(m.projects)))
-	s = append(s, "  "+selCount+"  •  "+totCount)
+	if m.directOpen {
+		totCount := selTotalStyle.Render(fmt.Sprintf("%d/%d projects", len(m.filtered), len(m.projects)))
+		s = append(s, "  "+totCount)
+	} else {
+		selCount := selCountStyle.Render(fmt.Sprintf("%d selected", len(m.selected)))
+		totCount := selTotalStyle.Render(fmt.Sprintf("%d/%d projects", len(m.filtered), len(m.projects)))
+		s = append(s, "  "+selCount+"  •  "+totCount)
+	}
 	s = append(s, "")
 
 	if len(m.filtered) == 0 {
@@ -1113,16 +1169,10 @@ func (m AppModel) renderSelector() string {
 			idx := m.filtered[i]
 			p := m.projects[idx]
 			isActive := i == m.selCursor
-			isSelected := m.selected[idx]
 
 			cur := "  "
 			if isActive {
 				cur = appCursorStyle.Render("▸ ")
-			}
-
-			chk := selCheckOffStyle.Render("○")
-			if isSelected {
-				chk = selCheckOnStyle.Render("●")
 			}
 
 			name := selProjectNameStyle.Render(p.Name)
@@ -1138,7 +1188,16 @@ func (m AppModel) renderSelector() string {
 			}
 			pathStr := selPathStyle.Render(truncatePath(p.Path, maxLen))
 
-			s = append(s, fmt.Sprintf("  %s%s %s %s  %s", cur, chk, name, tag, pathStr))
+			if m.directOpen {
+				s = append(s, fmt.Sprintf("  %s%s %s  %s", cur, name, tag, pathStr))
+			} else {
+				isSelected := m.selected[idx]
+				chk := selCheckOffStyle.Render("○")
+				if isSelected {
+					chk = selCheckOnStyle.Render("●")
+				}
+				s = append(s, fmt.Sprintf("  %s%s %s %s  %s", cur, chk, name, tag, pathStr))
+			}
 		}
 
 		remaining := len(m.filtered) - end
@@ -1147,16 +1206,25 @@ func (m AppModel) renderSelector() string {
 		}
 	}
 
-	// Help
 	s = append(s, "")
-	items := []struct{ key, desc string }{
-		{"↑↓", "navigate"},
-		{"space/tab", "toggle"},
-		{"↵", "continue"},
-		{"ctrl+r", "rescan"},
-		{"ctrl+a", "all"},
-		{"ctrl+d", "clear"},
-		{"esc", "back"},
+	var items []struct{ key, desc string }
+	if m.directOpen {
+		items = []struct{ key, desc string }{
+			{"↑↓", "navigate"},
+			{"↵", "open in Cursor"},
+			{"ctrl+r", "rescan"},
+			{"esc", "back"},
+		}
+	} else {
+		items = []struct{ key, desc string }{
+			{"↑↓", "navigate"},
+			{"space/tab", "toggle"},
+			{"↵", "continue"},
+			{"ctrl+r", "rescan"},
+			{"ctrl+a", "all"},
+			{"ctrl+d", "clear"},
+			{"esc", "back"},
+		}
 	}
 	s = append(s, "  "+renderHelp(items))
 
