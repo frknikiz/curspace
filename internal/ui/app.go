@@ -27,13 +27,35 @@ import (
 type appView int
 
 const (
-	viewMain     appView = iota // workspace dashboard
-	viewScanning                // spinner while scanning
-	viewSelector                // project multi-select
-	viewOrdering                // drag-to-reorder selected projects
-	viewNaming                  // workspace name input
-	viewAddRoot                 // add root directory input
+	viewMain       appView = iota // workspace dashboard
+	viewScanning                  // spinner while scanning
+	viewSelector                  // project multi-select
+	viewOrdering                  // drag-to-reorder selected projects
+	viewNaming                    // workspace name input
+	viewAddRoot                   // add root directory input
+	viewEditorPick                // choose between Cursor and Claude
+	viewSettings                  // terminal & default editor preferences
 )
+
+// settings option cycles
+var (
+	settingsTerminalOptions = []settingsOption{
+		{value: "", label: "auto", hint: "auto-detect (iTerm if installed/active, else Terminal.app)"},
+		{value: "iterm", label: "iterm", hint: "always launch iTerm"},
+		{value: "terminal", label: "terminal", hint: "always launch Terminal.app"},
+	}
+	settingsEditorOptions = []settingsOption{
+		{value: "", label: "ask", hint: "always show the editor picker"},
+		{value: "cursor", label: "cursor", hint: "skip picker, always open in Cursor"},
+		{value: "claude", label: "claude", hint: "skip picker, always open in Claude Code"},
+	}
+)
+
+type settingsOption struct {
+	value string
+	label string
+	hint  string
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Styles
@@ -212,9 +234,20 @@ type scanDoneMsg struct {
 // ═══════════════════════════════════════════════════════════════════
 
 type AppConfig struct {
-	Roots      []string
-	MaxDepth   int
-	OpenCursor func(string) error
+	Roots         []string
+	MaxDepth      int
+	Terminal      string
+	DefaultEditor string
+	OpenCursor    func(string) error
+	OpenClaude    func(primaryPath string, extraPaths []string) error
+}
+
+type editorPick struct {
+	label       string // workspace name or project name shown in status
+	primaryPath string // first folder for Claude / workspace file for Cursor
+	extraPaths  []string
+	cursorPath  string // path passed to OpenCursor (workspace file or project dir)
+	cursor      int    // 0 = Cursor, 1 = Claude
 }
 
 type scanIntent struct {
@@ -226,10 +259,21 @@ type scanIntent struct {
 }
 
 type AppModel struct {
-	view       appView
-	roots      []string
-	maxDepth   int
-	openCursor func(string) error
+	view          appView
+	roots         []string
+	maxDepth      int
+	terminal      string
+	defaultEditor string
+	openCursor    func(string) error
+	openClaude    func(primaryPath string, extraPaths []string) error
+
+	// editor picker
+	editorPick editorPick
+
+	// settings
+	settingsCursor   int    // 0 = terminal, 1 = default editor
+	settingsTerminal string // pending edit value
+	settingsEditor   string // pending edit value
 
 	// terminal
 	width  int
@@ -288,13 +332,16 @@ func NewAppModel(cfg AppConfig) AppModel {
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4"))
 
 	return AppModel{
-		view:       viewMain,
-		roots:      cfg.Roots,
-		maxDepth:   cfg.MaxDepth,
-		openCursor: cfg.OpenCursor,
-		spinner:    s,
-		selected:   make(map[int]bool),
-		wsExpanded: make(map[int]bool),
+		view:          viewMain,
+		roots:         cfg.Roots,
+		maxDepth:      cfg.MaxDepth,
+		terminal:      cfg.Terminal,
+		defaultEditor: cfg.DefaultEditor,
+		openCursor:    cfg.OpenCursor,
+		openClaude:    cfg.OpenClaude,
+		spinner:       s,
+		selected:      make(map[int]bool),
+		wsExpanded:    make(map[int]bool),
 	}
 }
 
@@ -332,6 +379,8 @@ func (m *AppModel) refreshConfig() error {
 	}
 	m.roots = cfg.Roots
 	m.maxDepth = cfg.MaxDepth
+	m.terminal = cfg.Terminal
+	m.defaultEditor = cfg.DefaultEditor
 	return nil
 }
 
@@ -483,6 +532,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateNaming(msg)
 	case viewAddRoot:
 		return m.updateAddRoot(msg)
+	case viewEditorPick:
+		return m.updateEditorPick(msg)
+	case viewSettings:
+		return m.updateSettings(msg)
 	}
 
 	return m, nil
@@ -553,13 +606,12 @@ func (m AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusErr = true
 					return m, nil
 				}
-				if err := m.openCursor(path); err != nil {
-					m.statusMsg = fmt.Sprintf("Cursor: %v", err)
-					m.statusErr = true
-				} else {
-					m.statusMsg = fmt.Sprintf("Opened '%s' in Cursor", ws.Name)
-					m.statusErr = false
-				}
+				return m.beginEditorPick(editorPick{
+					label:       ws.Name,
+					primaryPath: primaryFolderPath(ws.Folders),
+					extraPaths:  extraFolderPaths(ws.Folders),
+					cursorPath:  path,
+				})
 			}
 
 		case "d":
@@ -593,6 +645,18 @@ func (m AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncRootSuggestions()
 			m.view = viewAddRoot
 			return m, textinput.Blink
+
+		case "s":
+			if err := m.refreshConfig(); err != nil {
+				m.statusMsg = err.Error()
+				m.statusErr = true
+				return m, nil
+			}
+			m.settingsTerminal = m.terminal
+			m.settingsEditor = m.defaultEditor
+			m.settingsCursor = 0
+			m.view = viewSettings
+			return m, nil
 		}
 	}
 
@@ -674,16 +738,13 @@ func (m AppModel) updateSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.filtered) > 0 && m.selCursor < len(m.filtered) {
 				idx := m.filtered[m.selCursor]
 				p := m.projects[idx]
-				if err := m.openCursor(p.Path); err != nil {
-					m.statusMsg = fmt.Sprintf("Cursor: %v", err)
-					m.statusErr = true
-				} else {
-					m.statusMsg = fmt.Sprintf("Opened project '%s' in Cursor", p.Name)
-					m.statusErr = false
-				}
 				m.directOpen = false
-				m.view = viewMain
-				return m, nil
+				return m.beginEditorPick(editorPick{
+					label:       p.Name,
+					primaryPath: p.Path,
+					extraPaths:  nil,
+					cursorPath:  p.Path,
+				})
 			}
 		} else if len(m.selected) > 0 {
 			m.selectedProjects = nil
@@ -930,21 +991,307 @@ func (m AppModel) updateNaming(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, loadWorkspacesCmd
 			}
 
-			if err := m.openCursor(wsPath); err != nil {
-				m.statusMsg = fmt.Sprintf("Created '%s', but Cursor failed: %v", name, err)
-				m.statusErr = true
-			} else {
-				m.statusMsg = fmt.Sprintf("Created and opened '%s' in Cursor", name)
-				m.statusErr = false
-			}
-			m.view = viewMain
-			return m, loadWorkspacesCmd
+			model, pickCmd := m.beginEditorPick(editorPick{
+				label:       name,
+				primaryPath: primaryFolderPath(folders),
+				extraPaths:  extraFolderPaths(folders),
+				cursorPath:  wsPath,
+			})
+			return model, tea.Batch(loadWorkspacesCmd, pickCmd)
 		}
 	}
 
 	var cmd tea.Cmd
 	m.nameInput, cmd = m.nameInput.Update(msg)
 	return m, cmd
+}
+
+// ── Editor picker view ────────────────────────────────────────────
+
+// beginEditorPick either shows the picker or, when the user has set a default
+// editor in settings, runs that editor immediately and skips the view.
+func (m AppModel) beginEditorPick(p editorPick) (tea.Model, tea.Cmd) {
+	switch m.defaultEditor {
+	case editorPickClaude:
+		p.cursor = 1
+		m.editorPick = p
+		return m.runEditorPick()
+	case editorPickCursor:
+		p.cursor = 0
+		m.editorPick = p
+		return m.runEditorPick()
+	}
+	p.cursor = 0
+	m.editorPick = p
+	m.view = viewEditorPick
+	return m, nil
+}
+
+const (
+	editorPickCursor = "cursor"
+	editorPickClaude = "claude"
+)
+
+func (m AppModel) updateEditorPick(msg tea.Msg) (tea.Model, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	switch km.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "esc":
+		m.view = viewMain
+		return m, loadWorkspacesCmd
+	case "up", "k":
+		if m.editorPick.cursor > 0 {
+			m.editorPick.cursor--
+		}
+	case "down", "j":
+		if m.editorPick.cursor < 1 {
+			m.editorPick.cursor++
+		}
+	case "c", "C":
+		m.editorPick.cursor = 0
+		return m.runEditorPick()
+	case "l", "L":
+		m.editorPick.cursor = 1
+		return m.runEditorPick()
+	case "enter":
+		return m.runEditorPick()
+	}
+
+	return m, nil
+}
+
+func (m AppModel) runEditorPick() (tea.Model, tea.Cmd) {
+	pick := m.editorPick
+	m.view = viewMain
+
+	if pick.cursor == 1 {
+		if m.openClaude == nil {
+			m.statusMsg = "Claude launcher is not configured"
+			m.statusErr = true
+			return m, loadWorkspacesCmd
+		}
+		if err := m.openClaude(pick.primaryPath, pick.extraPaths); err != nil {
+			m.statusMsg = fmt.Sprintf("Claude: %v", err)
+			m.statusErr = true
+		} else {
+			m.statusMsg = fmt.Sprintf("Opened '%s' in Claude", pick.label)
+			m.statusErr = false
+		}
+		return m, loadWorkspacesCmd
+	}
+
+	if err := m.openCursor(pick.cursorPath); err != nil {
+		m.statusMsg = fmt.Sprintf("Cursor: %v", err)
+		m.statusErr = true
+	} else {
+		m.statusMsg = fmt.Sprintf("Opened '%s' in Cursor", pick.label)
+		m.statusErr = false
+	}
+	return m, loadWorkspacesCmd
+}
+
+func (m AppModel) renderEditorPick() string {
+	var s []string
+	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("choose editor"))
+	s = append(s, "")
+	s = append(s, "  "+appDetailStyle.Render(fmt.Sprintf("Target: %s", m.editorPick.label)))
+	s = append(s, "")
+
+	options := []struct {
+		name string
+		hint string
+		key  string
+	}{
+		{"Cursor", "open as multi-root .code-workspace", "c"},
+		{"Claude Code", "claude in primary folder + --add-dir for extras", "l"},
+	}
+
+	for i, opt := range options {
+		isActive := i == m.editorPick.cursor
+		cur := "  "
+		if isActive {
+			cur = appCursorStyle.Render("▸ ")
+		}
+		name := appNameStyle.Render(opt.name)
+		if isActive {
+			name = appSelectedNameStyle.Render(opt.name)
+		}
+		hotkey := appHelpKeyStyle.Render(fmt.Sprintf("[%s]", opt.key))
+		hint := appDetailStyle.Render(opt.hint)
+		s = append(s, fmt.Sprintf("  %s%s %s  %s", cur, hotkey, name, hint))
+	}
+
+	s = append(s, "")
+	items := []struct{ key, desc string }{
+		{"↑↓", "navigate"},
+		{"↵", "open"},
+		{"c", "Cursor"},
+		{"l", "Claude"},
+		{"esc", "back"},
+	}
+	s = append(s, "  "+renderHelp(items))
+	return appPadding.Render(strings.Join(s, "\n"))
+}
+
+// ── Settings view ─────────────────────────────────────────────────
+
+func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	switch km.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "esc":
+		m.view = viewMain
+		return m, nil
+	case "up", "k":
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		}
+	case "down", "j":
+		if m.settingsCursor < 1 {
+			m.settingsCursor++
+		}
+	case "left", "h":
+		m.cycleSettingsValue(-1)
+	case "right", "l", "tab", " ":
+		m.cycleSettingsValue(1)
+	case "enter":
+		cfg, err := config.Load()
+		if err != nil {
+			m.statusMsg = err.Error()
+			m.statusErr = true
+			m.view = viewMain
+			return m, nil
+		}
+		cfg.Terminal = m.settingsTerminal
+		cfg.DefaultEditor = m.settingsEditor
+		if err := config.Save(cfg); err != nil {
+			m.statusMsg = err.Error()
+			m.statusErr = true
+		} else {
+			m.terminal = m.settingsTerminal
+			m.defaultEditor = m.settingsEditor
+			m.statusMsg = "Settings saved"
+			m.statusErr = false
+		}
+		m.view = viewMain
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m *AppModel) cycleSettingsValue(delta int) {
+	if m.settingsCursor == 0 {
+		m.settingsTerminal = cycleSettingsOption(settingsTerminalOptions, m.settingsTerminal, delta)
+	} else {
+		m.settingsEditor = cycleSettingsOption(settingsEditorOptions, m.settingsEditor, delta)
+	}
+}
+
+func cycleSettingsOption(opts []settingsOption, current string, delta int) string {
+	idx := 0
+	for i, opt := range opts {
+		if opt.value == current {
+			idx = i
+			break
+		}
+	}
+	next := (idx + delta + len(opts)) % len(opts)
+	return opts[next].value
+}
+
+func settingsLabelFor(opts []settingsOption, value string) string {
+	for _, opt := range opts {
+		if opt.value == value {
+			return opt.label
+		}
+	}
+	return opts[0].label
+}
+
+func settingsHintFor(opts []settingsOption, value string) string {
+	for _, opt := range opts {
+		if opt.value == value {
+			return opt.hint
+		}
+	}
+	return opts[0].hint
+}
+
+func (m AppModel) renderSettings() string {
+	var s []string
+	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("settings"))
+	s = append(s, "")
+	s = append(s, "  "+appMutedHintStyle.Render("Persisted to ~/.curspace/config.json. Use ←/→ to change a value, ↵ to save."))
+	s = append(s, "")
+
+	rows := []struct {
+		title   string
+		options []settingsOption
+		value   string
+	}{
+		{"Terminal", settingsTerminalOptions, m.settingsTerminal},
+		{"Default editor", settingsEditorOptions, m.settingsEditor},
+	}
+
+	for i, row := range rows {
+		isActive := i == m.settingsCursor
+		cur := "  "
+		if isActive {
+			cur = appCursorStyle.Render("▸ ")
+		}
+
+		title := appNameStyle.Render(row.title)
+		if isActive {
+			title = appSelectedNameStyle.Render(row.title)
+		}
+
+		valueLabel := settingsLabelFor(row.options, row.value)
+		hint := settingsHintFor(row.options, row.value)
+		valueStyled := appHelpKeyStyle.Render("[ " + valueLabel + " ]")
+		s = append(s, fmt.Sprintf("  %s%-18s  %s", cur, title, valueStyled))
+		s = append(s, "      "+appDetailStyle.Render(hint))
+		s = append(s, "")
+	}
+
+	items := []struct{ key, desc string }{
+		{"↑↓", "row"},
+		{"←→", "value"},
+		{"↵", "save"},
+		{"esc", "cancel"},
+	}
+	s = append(s, "  "+renderHelp(items))
+	return appPadding.Render(strings.Join(s, "\n"))
+}
+
+func primaryFolderPath(folders []workspace.WorkspaceFolder) string {
+	if len(folders) == 0 {
+		return ""
+	}
+	return folders[0].Path
+}
+
+func extraFolderPaths(folders []workspace.WorkspaceFolder) []string {
+	if len(folders) <= 1 {
+		return nil
+	}
+	out := make([]string, 0, len(folders)-1)
+	for _, f := range folders[1:] {
+		out = append(out, f.Path)
+	}
+	return out
 }
 
 // ── Add root view ─────────────────────────────────────────────────
@@ -1004,6 +1351,10 @@ func (m AppModel) View() string {
 		return m.renderNaming()
 	case viewAddRoot:
 		return m.renderAddRoot()
+	case viewEditorPick:
+		return m.renderEditorPick()
+	case viewSettings:
+		return m.renderSettings()
 	}
 
 	return ""
@@ -1131,6 +1482,7 @@ func (m AppModel) renderMainHelp() string {
 		{"d", "delete"},
 		{"r", "rename"},
 		{"a", "add root"},
+		{"s", "settings"},
 		{"q", "quit"},
 	}
 	return "  " + renderHelp(items)
@@ -1257,7 +1609,7 @@ func (m AppModel) renderSelector() string {
 	if m.directOpen {
 		items = []struct{ key, desc string }{
 			{"↑↓", "navigate"},
-			{"↵", "open in Cursor"},
+			{"↵", "choose editor"},
 			{"ctrl+r", "rescan"},
 			{"esc", "back"},
 		}
@@ -1297,7 +1649,7 @@ func (m AppModel) renderNaming() string {
 
 	s = append(s, "")
 	items := []struct{ key, desc string }{
-		{"↵", "create & open"},
+		{"↵", "create & choose editor"},
 		{"esc", "back"},
 	}
 	s = append(s, "  "+renderHelp(items))

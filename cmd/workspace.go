@@ -4,10 +4,11 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/frknikiz/curspace/internal/cursor"
 	"github.com/frknikiz/curspace/internal/workspace"
 	"github.com/spf13/cobra"
 )
+
+var workspaceOpenEditor string
 
 var (
 	wsSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Bold(true)
@@ -49,19 +50,28 @@ var workspaceListCmd = &cobra.Command{
 
 var workspaceOpenCmd = &cobra.Command{
 	Use:   "open <name>",
-	Short: "Open a saved workspace in Cursor",
+	Short: "Open a saved workspace in Cursor or Claude",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateEditor(workspaceOpenEditor); err != nil {
+			return err
+		}
+
 		path, err := workspace.Open(args[0])
 		if err != nil {
 			return err
 		}
 
-		if err := cursor.Open(path); err != nil {
-			return fmt.Errorf("opening in Cursor: %w", err)
+		ws, err := workspace.Read(args[0])
+		if err != nil {
+			return err
 		}
 
-		fmt.Printf("%s Opened workspace %s in Cursor\n", wsSuccessStyle.Render("✓"), wsNameStyle.Render(args[0]))
+		if err := launchEditor(workspaceOpenEditor, ws.Folders, path); err != nil {
+			return fmt.Errorf("opening in %s: %w", workspaceOpenEditor, err)
+		}
+
+		fmt.Printf("%s Opened workspace %s in %s\n", wsSuccessStyle.Render("✓"), wsNameStyle.Render(args[0]), workspaceOpenEditor)
 		return nil
 	},
 }
@@ -95,6 +105,7 @@ var workspaceRenameCmd = &cobra.Command{
 }
 
 func init() {
+	workspaceOpenCmd.Flags().StringVarP(&workspaceOpenEditor, "editor", "e", editorCursor, "Editor to launch: cursor or claude")
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceOpenCmd)
 	workspaceCmd.AddCommand(workspaceDeleteCmd)
