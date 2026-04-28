@@ -9,12 +9,12 @@
 <h1 align="center">curspace</h1>
 
 <p align="center">
-  <strong>Terminal-first project discovery and workspace launcher for <a href="https://cursor.sh">Cursor IDE</a></strong>
+  <strong>Terminal-first project discovery and workspace launcher for <a href="https://cursor.sh">Cursor IDE</a> and <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a></strong>
 </p>
 
 <p align="center">
   Scan your filesystem for projects, pick what you need in a fast TUI,<br>
-  arrange the folder order, and open everything as a multi-root workspace in Cursor &mdash; in seconds.
+  arrange the folder order, and open everything as a multi-root workspace in Cursor &mdash; or fire up Claude Code in the primary folder with the rest attached via <code>--add-dir</code>.
 </p>
 
 ---
@@ -27,15 +27,16 @@ If you juggle dozens of repositories every day, creating multi-root workspaces b
 curspace
 ```
 
-It discovers every project under the directories you configure, presents them in a filterable list, lets you reorder them (the first folder becomes the primary workspace root), names the workspace, and opens it in Cursor.
+It discovers every project under the directories you configure, presents them in a filterable list, lets you reorder them (the first folder becomes the primary workspace root), names the workspace, and opens it in your editor of choice &mdash; Cursor or Claude Code.
 
 ## Features
 
 - **Auto-discovery** &mdash; Recursively detects Go, Node, Java, Python, Rust, .NET, PHP, and Git projects by their marker files.
 - **Interactive TUI** &mdash; Fuzzy filter, multi-select, rescan, and continue without leaving the terminal.
 - **Drag-to-reorder** &mdash; Arrange the selected projects before saving; the first item becomes the primary workspace folder.
-- **Open single project** &mdash; Pick any discovered project and open it directly in Cursor, no workspace file needed.
-- **Instant open** &mdash; Creates a `.code-workspace` file and launches Cursor in one step.
+- **Open single project** &mdash; Pick any discovered project and open it directly in Cursor or Claude, no workspace file needed.
+- **Instant open** &mdash; Creates a `.code-workspace` file and launches your editor (Cursor or Claude Code) in one step.
+- **Editor picker** &mdash; Every open action prompts for Cursor or Claude; Claude launches `claude` in the primary folder with all other folders added via `--add-dir`.
 - **Workspace hub** &mdash; List, reopen, rename, and delete saved workspaces from the same TUI.
 - **Path autocomplete** &mdash; Tab-complete directories when adding scan roots.
 - **Scan caching** &mdash; Reuses previous discovery results for sub-second startup.
@@ -82,19 +83,23 @@ Running `curspace` without arguments opens the interactive workspace hub where y
 | Key | Action |
 |-----|--------|
 | `n` | New workspace (scan & select) |
-| `o` | Open a single project directly in Cursor |
+| `o` | Open a single project (editor picker appears) |
 | `ctrl+r` | Force rescan from disk |
-| `Enter` | Open selected workspace in Cursor |
+| `Enter` | Open selected workspace (editor picker appears) |
 | `d` | Delete workspace |
 | `r` | Rename workspace |
 | `a` | Add a new project root |
+| `s` | Open settings (terminal + default editor) |
 | `q` | Quit |
+
+When you trigger an open action, a small picker asks whether to launch **Cursor** (`c`) or **Claude Code** (`l`).
 
 ### Open (one-shot)
 
 ```bash
-curspace open            # scan, select, order, name, open
-curspace open --refresh  # force rescan, bypass cache
+curspace open                       # scan, select, order, name, open in Cursor
+curspace open --editor claude       # same flow, but launch Claude Code
+curspace open --refresh             # force rescan, bypass cache
 ```
 
 ### Project roots
@@ -114,10 +119,11 @@ curspace scan                  # scan and print discovered projects
 ### Workspace management
 
 ```bash
-curspace workspace list                    # list saved workspaces
-curspace workspace open <name>             # open in Cursor
-curspace workspace delete <name>           # delete workspace file
-curspace workspace rename <old> <new>      # rename a workspace
+curspace workspace list                          # list saved workspaces
+curspace workspace open <name>                   # open in Cursor (default)
+curspace workspace open <name> --editor claude   # open in Claude Code
+curspace workspace delete <name>                 # delete workspace file
+curspace workspace rename <old> <new>            # rename a workspace
 ```
 
 ## Keyboard Reference
@@ -164,7 +170,9 @@ All state lives under `~/.curspace/`:
     "/Users/you/projects",
     "/Users/you/work"
   ],
-  "max_depth": 10
+  "max_depth": 10,
+  "terminal": "iterm",
+  "default_editor": "claude"
 }
 ```
 
@@ -172,6 +180,10 @@ All state lives under `~/.curspace/`:
 |-------|---------|-------------|
 | `roots` | `[]` | Directories to scan for projects |
 | `max_depth` | `10` | Maximum directory depth for recursive scanning |
+| `terminal` | auto-detect | Terminal app used to launch Claude Code. macOS: `iterm` or `terminal`. Linux: any executable name (overrides `$TERMINAL`). Leave empty to auto-detect (prefers iTerm if installed/active, else Terminal.app). |
+| `default_editor` | _(empty)_ | Skip the editor picker and always launch this editor. Allowed: `cursor`, `claude`. Leave empty to be asked on every open. |
+
+Tip: Both `terminal` and `default_editor` can also be edited from the hub (press `s`).
 
 ## Supported Project Types
 
@@ -209,7 +221,8 @@ curspace/
 │   ├── discovery/             # scan + cache orchestration
 │   ├── cache/                 # scan result caching
 │   ├── config/                # ~/.curspace/config.json
-│   └── cursor/                # Cursor IDE launcher
+│   ├── cursor/                # Cursor IDE launcher
+│   └── claude/                # Claude Code launcher (Terminal + --add-dir)
 ├── .goreleaser.yaml
 ├── LICENSE
 └── README.md

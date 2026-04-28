@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/frknikiz/curspace/internal/claude"
 	"github.com/frknikiz/curspace/internal/config"
 	"github.com/frknikiz/curspace/internal/cursor"
 	"github.com/frknikiz/curspace/internal/discovery"
@@ -14,7 +15,44 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var refreshFlag bool
+var (
+	refreshFlag bool
+	openEditor  string
+)
+
+const (
+	editorCursor = "cursor"
+	editorClaude = "claude"
+)
+
+func validateEditor(value string) error {
+	switch value {
+	case editorCursor, editorClaude:
+		return nil
+	default:
+		return fmt.Errorf("invalid --editor value %q (allowed: cursor, claude)", value)
+	}
+}
+
+func launchEditor(editor string, folders []workspace.WorkspaceFolder, wsPath string) error {
+	switch editor {
+	case editorClaude:
+		if len(folders) == 0 {
+			return fmt.Errorf("no folders to open in Claude")
+		}
+		extras := make([]string, 0, len(folders)-1)
+		for _, f := range folders[1:] {
+			extras = append(extras, f.Path)
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		return claude.Open(folders[0].Path, extras, cfg.Terminal)
+	default:
+		return cursor.Open(wsPath)
+	}
+}
 
 var (
 	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Bold(true)
@@ -24,9 +62,13 @@ var (
 
 var openCmd = &cobra.Command{
 	Use:   "open",
-	Short: "Select projects and open as workspace in Cursor",
-	Long:  "Scans for projects (or uses cache), presents a TUI selector, creates a workspace, and opens it in Cursor.",
+	Short: "Select projects and open as workspace in Cursor or Claude",
+	Long:  "Scans for projects (or uses cache), presents a TUI selector, creates a workspace, and opens it in Cursor or Claude Code.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateEditor(openEditor); err != nil {
+			return err
+		}
+
 		cfg, err := config.Load()
 		if err != nil {
 			return err
@@ -118,16 +160,17 @@ var openCmd = &cobra.Command{
 
 		fmt.Printf("\n%s Created workspace: %s\n", successStyle.Render("✓"), infoStyle.Render(wsPath))
 
-		if err := cursor.Open(wsPath); err != nil {
-			return fmt.Errorf("opening in Cursor: %w", err)
+		if err := launchEditor(openEditor, folders, wsPath); err != nil {
+			return fmt.Errorf("opening in %s: %w", openEditor, err)
 		}
 
-		fmt.Printf("%s Opened in Cursor!\n", successStyle.Render("✓"))
+		fmt.Printf("%s Opened in %s!\n", successStyle.Render("✓"), openEditor)
 		return nil
 	},
 }
 
 func init() {
 	openCmd.Flags().BoolVar(&refreshFlag, "refresh", false, "Bypass cache and rescan projects")
+	openCmd.Flags().StringVarP(&openEditor, "editor", "e", editorCursor, "Editor to launch: cursor or claude")
 	rootCmd.AddCommand(openCmd)
 }

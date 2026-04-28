@@ -17,6 +17,13 @@ const (
 type Config struct {
 	Roots    []string `json:"roots"`
 	MaxDepth int      `json:"max_depth"`
+	// Terminal selects the macOS/Linux terminal app used to launch Claude Code.
+	// Leave empty for auto-detect. Supported values: "iterm", "terminal" (macOS),
+	// or any executable name on Linux (overrides $TERMINAL).
+	Terminal string `json:"terminal,omitempty"`
+	// DefaultEditor skips the editor picker when opening workspaces or projects.
+	// Allowed: "" (always ask), "cursor", "claude".
+	DefaultEditor string `json:"default_editor,omitempty"`
 }
 
 func DefaultConfig() *Config {

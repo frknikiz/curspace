@@ -122,6 +122,28 @@ func Open(name string) (string, error) {
 	return path, nil
 }
 
+func Read(name string) (WorkspaceFile, error) {
+	path, err := workspaceFilePath(name)
+	if err != nil {
+		return WorkspaceFile{}, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return WorkspaceFile{}, fmt.Errorf("workspace not found: %s", name)
+		}
+		return WorkspaceFile{}, fmt.Errorf("reading workspace: %w", err)
+	}
+
+	var ws WorkspaceFile
+	if err := json.Unmarshal(data, &ws); err != nil {
+		return WorkspaceFile{}, fmt.Errorf("parsing workspace: %w", err)
+	}
+
+	return ws, nil
+}
+
 func Delete(name string) error {
 	path, err := workspaceFilePath(name)
 	if err != nil {

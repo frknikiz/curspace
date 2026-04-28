@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/frknikiz/curspace/internal/claude"
 	"github.com/frknikiz/curspace/internal/config"
 	"github.com/frknikiz/curspace/internal/cursor"
 	"github.com/frknikiz/curspace/internal/ui"
@@ -24,9 +25,18 @@ var rootCmd = &cobra.Command{
 		}
 
 		return ui.RunApp(ui.AppConfig{
-			Roots:      cfg.Roots,
-			MaxDepth:   cfg.MaxDepth,
-			OpenCursor: cursor.Open,
+			Roots:         cfg.Roots,
+			MaxDepth:      cfg.MaxDepth,
+			Terminal:      cfg.Terminal,
+			DefaultEditor: cfg.DefaultEditor,
+			OpenCursor:    cursor.Open,
+			OpenClaude: func(primaryPath string, extraPaths []string) error {
+				current, err := config.Load()
+				if err != nil {
+					return err
+				}
+				return claude.Open(primaryPath, extraPaths, current.Terminal)
+			},
 		})
 	},
 }
