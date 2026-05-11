@@ -34,6 +34,7 @@ const (
 	viewNaming                    // workspace name input
 	viewAddRoot                   // add root directory input
 	viewEditorPick                // choose between Cursor and Claude
+	viewClaudeTokenPick           // choose a saved Claude token
 	viewSettings                  // terminal & default editor preferences
 )
 
@@ -238,8 +239,9 @@ type AppConfig struct {
 	MaxDepth      int
 	Terminal      string
 	DefaultEditor string
+	ClaudeTokens  []config.ClaudeToken
 	OpenCursor    func(string) error
-	OpenClaude    func(primaryPath string, extraPaths []string) error
+	OpenClaude    func(primaryPath string, extraPaths []string, tokenName string) error
 }
 
 type editorPick struct {
@@ -248,6 +250,11 @@ type editorPick struct {
 	extraPaths  []string
 	cursorPath  string // path passed to OpenCursor (workspace file or project dir)
 	cursor      int    // 0 = Cursor, 1 = Claude
+}
+
+type claudeTokenPick struct {
+	editorPick editorPick
+	cursor     int // 0..len(tokens)-1 = saved token, len(tokens) = current env/login
 }
 
 type scanIntent struct {
@@ -264,11 +271,13 @@ type AppModel struct {
 	maxDepth      int
 	terminal      string
 	defaultEditor string
+	claudeTokens  []config.ClaudeToken
 	openCursor    func(string) error
-	openClaude    func(primaryPath string, extraPaths []string) error
+	openClaude    func(primaryPath string, extraPaths []string, tokenName string) error
 
 	// editor picker
-	editorPick editorPick
+	editorPick      editorPick
+	claudeTokenPick claudeTokenPick
 
 	// settings
 	settingsCursor   int    // 0 = terminal, 1 = default editor
@@ -337,6 +346,7 @@ func NewAppModel(cfg AppConfig) AppModel {
 		maxDepth:      cfg.MaxDepth,
 		terminal:      cfg.Terminal,
 		defaultEditor: cfg.DefaultEditor,
+		claudeTokens:  cfg.ClaudeTokens,
 		openCursor:    cfg.OpenCursor,
 		openClaude:    cfg.OpenClaude,
 		spinner:       s,
@@ -381,6 +391,7 @@ func (m *AppModel) refreshConfig() error {
 	m.maxDepth = cfg.MaxDepth
 	m.terminal = cfg.Terminal
 	m.defaultEditor = cfg.DefaultEditor
+	m.claudeTokens = cfg.ClaudeTokens
 	return nil
 }
 
@@ -534,6 +545,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAddRoot(msg)
 	case viewEditorPick:
 		return m.updateEditorPick(msg)
+	case viewClaudeTokenPick:
+		return m.updateClaudeTokenPick(msg)
 	case viewSettings:
 		return m.updateSettings(msg)
 	}
@@ -1071,19 +1084,17 @@ func (m AppModel) runEditorPick() (tea.Model, tea.Cmd) {
 	m.view = viewMain
 
 	if pick.cursor == 1 {
-		if m.openClaude == nil {
-			m.statusMsg = "Claude launcher is not configured"
+		if err := m.refreshConfig(); err != nil {
+			m.statusMsg = err.Error()
 			m.statusErr = true
-			return m, loadWorkspacesCmd
+			return m, nil
 		}
-		if err := m.openClaude(pick.primaryPath, pick.extraPaths); err != nil {
-			m.statusMsg = fmt.Sprintf("Claude: %v", err)
-			m.statusErr = true
-		} else {
-			m.statusMsg = fmt.Sprintf("Opened '%s' in Claude", pick.label)
-			m.statusErr = false
+		if len(m.claudeTokens) > 0 {
+			m.claudeTokenPick = claudeTokenPick{editorPick: pick}
+			m.view = viewClaudeTokenPick
+			return m, nil
 		}
-		return m, loadWorkspacesCmd
+		return m.launchClaude(pick, "")
 	}
 
 	if err := m.openCursor(pick.cursorPath); err != nil {
@@ -1091,6 +1102,59 @@ func (m AppModel) runEditorPick() (tea.Model, tea.Cmd) {
 		m.statusErr = true
 	} else {
 		m.statusMsg = fmt.Sprintf("Opened '%s' in Cursor", pick.label)
+		m.statusErr = false
+	}
+	return m, loadWorkspacesCmd
+}
+
+func (m AppModel) updateClaudeTokenPick(msg tea.Msg) (tea.Model, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	maxCursor := len(m.claudeTokens)
+	switch km.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "esc":
+		m.view = viewMain
+		return m, loadWorkspacesCmd
+	case "up", "k":
+		if m.claudeTokenPick.cursor > 0 {
+			m.claudeTokenPick.cursor--
+		}
+	case "down", "j":
+		if m.claudeTokenPick.cursor < maxCursor {
+			m.claudeTokenPick.cursor++
+		}
+	case "enter":
+		tokenName := ""
+		if m.claudeTokenPick.cursor < len(m.claudeTokens) {
+			tokenName = m.claudeTokens[m.claudeTokenPick.cursor].Name
+		}
+		return m.launchClaude(m.claudeTokenPick.editorPick, tokenName)
+	}
+
+	return m, nil
+}
+
+func (m AppModel) launchClaude(pick editorPick, tokenName string) (tea.Model, tea.Cmd) {
+	m.view = viewMain
+	if m.openClaude == nil {
+		m.statusMsg = "Claude launcher is not configured"
+		m.statusErr = true
+		return m, loadWorkspacesCmd
+	}
+	if err := m.openClaude(pick.primaryPath, pick.extraPaths, tokenName); err != nil {
+		m.statusMsg = fmt.Sprintf("Claude: %v", err)
+		m.statusErr = true
+	} else if tokenName != "" {
+		m.statusMsg = fmt.Sprintf("Opened '%s' in Claude with token '%s'", pick.label, tokenName)
+		m.statusErr = false
+	} else {
+		m.statusMsg = fmt.Sprintf("Opened '%s' in Claude", pick.label)
 		m.statusErr = false
 	}
 	return m, loadWorkspacesCmd
@@ -1134,6 +1198,48 @@ func (m AppModel) renderEditorPick() string {
 		{"c", "Cursor"},
 		{"l", "Claude"},
 		{"esc", "back"},
+	}
+	s = append(s, "  "+renderHelp(items))
+	return appPadding.Render(strings.Join(s, "\n"))
+}
+
+func (m AppModel) renderClaudeTokenPick() string {
+	var s []string
+	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("choose Claude token"))
+	s = append(s, "")
+	s = append(s, "  "+appDetailStyle.Render(fmt.Sprintf("Target: %s", m.claudeTokenPick.editorPick.label)))
+	s = append(s, "")
+
+	for i, token := range m.claudeTokens {
+		isActive := i == m.claudeTokenPick.cursor
+		cur := "  "
+		if isActive {
+			cur = appCursorStyle.Render("▸ ")
+		}
+		name := appNameStyle.Render(token.Name)
+		if isActive {
+			name = appSelectedNameStyle.Render(token.Name)
+		}
+		s = append(s, fmt.Sprintf("  %s%s  %s", cur, name, appDetailStyle.Render("set ANTHROPIC_API_KEY")))
+	}
+
+	noTokenIdx := len(m.claudeTokens)
+	isActive := noTokenIdx == m.claudeTokenPick.cursor
+	cur := "  "
+	if isActive {
+		cur = appCursorStyle.Render("▸ ")
+	}
+	name := appNameStyle.Render("current Claude login / environment")
+	if isActive {
+		name = appSelectedNameStyle.Render("current Claude login / environment")
+	}
+	s = append(s, fmt.Sprintf("  %s%s", cur, name))
+
+	s = append(s, "")
+	items := []struct{ key, desc string }{
+		{"↑↓", "navigate"},
+		{"↵", "open"},
+		{"esc", "cancel"},
 	}
 	s = append(s, "  "+renderHelp(items))
 	return appPadding.Render(strings.Join(s, "\n"))
@@ -1353,6 +1459,8 @@ func (m AppModel) View() string {
 		return m.renderAddRoot()
 	case viewEditorPick:
 		return m.renderEditorPick()
+	case viewClaudeTokenPick:
+		return m.renderClaudeTokenPick()
 	case viewSettings:
 		return m.renderSettings()
 	}

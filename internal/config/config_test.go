@@ -21,8 +21,9 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	cfg := &Config{
-		Roots:    []string{"/projects/a", "/projects/b"},
-		MaxDepth: 5,
+		Roots:        []string{"/projects/a", "/projects/b"},
+		MaxDepth:     5,
+		ClaudeTokens: []ClaudeToken{{Name: "work", Value: "sk-ant-work"}},
 	}
 
 	// When
@@ -47,6 +48,12 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 		if r != cfg.Roots[i] {
 			t.Errorf("Roots[%d]: got %q, want %q", i, r, cfg.Roots[i])
 		}
+	}
+	if len(loaded.ClaudeTokens) != 1 {
+		t.Fatalf("ClaudeTokens length: got %d, want 1", len(loaded.ClaudeTokens))
+	}
+	if loaded.ClaudeTokens[0] != cfg.ClaudeTokens[0] {
+		t.Errorf("ClaudeTokens[0]: got %#v, want %#v", loaded.ClaudeTokens[0], cfg.ClaudeTokens[0])
 	}
 }
 
@@ -207,5 +214,78 @@ func TestSaveAtomicity(t *testing.T) {
 	}
 	if len(loaded.Roots) != 2 {
 		t.Errorf("expected 2 roots after save, got %d", len(loaded.Roots))
+	}
+}
+
+func TestSaveUsesPrivateFileMode(t *testing.T) {
+	// Given
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// When
+	if err := Save(&Config{Roots: []string{"/a"}, MaxDepth: 3}); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Then
+	info, err := os.Stat(filepath.Join(tmpDir, configDir, configFile))
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("config file mode: got %o, want 600", got)
+	}
+}
+
+func TestSetClaudeTokenAddsAndUpdatesByName(t *testing.T) {
+	// Given
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// When
+	if err := SetClaudeToken("work", "first"); err != nil {
+		t.Fatalf("SetClaudeToken add failed: %v", err)
+	}
+	if err := SetClaudeToken("work", "second"); err != nil {
+		t.Fatalf("SetClaudeToken update failed: %v", err)
+	}
+
+	// Then
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.ClaudeTokens) != 1 {
+		t.Fatalf("ClaudeTokens length: got %d, want 1", len(cfg.ClaudeTokens))
+	}
+	if cfg.ClaudeTokens[0].Value != "second" {
+		t.Fatalf("Claude token value: got %q, want second", cfg.ClaudeTokens[0].Value)
+	}
+}
+
+func TestClaudeTokenValueAndRemove(t *testing.T) {
+	// Given
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	if err := SetClaudeToken("personal", "sk-ant-personal"); err != nil {
+		t.Fatalf("SetClaudeToken failed: %v", err)
+	}
+
+	// When
+	value, err := ClaudeTokenValue("personal")
+
+	// Then
+	if err != nil {
+		t.Fatalf("ClaudeTokenValue failed: %v", err)
+	}
+	if value != "sk-ant-personal" {
+		t.Fatalf("ClaudeTokenValue: got %q, want sk-ant-personal", value)
+	}
+
+	if err := RemoveClaudeToken("personal"); err != nil {
+		t.Fatalf("RemoveClaudeToken failed: %v", err)
+	}
+	if _, err := ClaudeTokenValue("personal"); err == nil {
+		t.Fatal("expected removed token lookup to fail")
 	}
 }

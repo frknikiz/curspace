@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/frknikiz/curspace/internal/claude"
@@ -48,10 +52,49 @@ func launchEditor(editor string, folders []workspace.WorkspaceFolder, wsPath str
 		if err != nil {
 			return err
 		}
-		return claude.Open(folders[0].Path, extras, cfg.Terminal)
+		tokenName, err := chooseClaudeTokenName(cfg.ClaudeTokens)
+		if err != nil {
+			return err
+		}
+		return claude.Open(folders[0].Path, extras, cfg.Terminal, tokenName)
 	default:
 		return cursor.Open(wsPath)
 	}
+}
+
+func chooseClaudeTokenName(tokens []config.ClaudeToken) (string, error) {
+	if len(tokens) == 0 {
+		return "", nil
+	}
+
+	fmt.Println()
+	fmt.Println(infoStyle.Render("Claude token"))
+	for i, token := range tokens {
+		fmt.Printf("  %d) %s\n", i+1, token.Name)
+	}
+	fmt.Println("  0) current Claude login / environment")
+	fmt.Print("Select token [1]: ")
+
+	input, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && len(input) == 0 {
+		return "", fmt.Errorf("reading token selection: %w", err)
+	}
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return tokens[0].Name, nil
+	}
+
+	choice, err := strconv.Atoi(input)
+	if err != nil {
+		return "", fmt.Errorf("invalid token selection %q", input)
+	}
+	if choice == 0 {
+		return "", nil
+	}
+	if choice < 1 || choice > len(tokens) {
+		return "", fmt.Errorf("token selection out of range: %d", choice)
+	}
+	return tokens[choice-1].Name, nil
 }
 
 var (

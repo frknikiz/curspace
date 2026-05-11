@@ -11,13 +11,14 @@ import (
 // Open launches Claude Code in the given primary directory and adds extra
 // directories via --add-dir flags. terminal selects the host terminal app:
 // "" / "auto" → auto-detect; "iterm" / "iterm2"; "terminal" (Terminal.app);
-// on Linux, any executable name (overrides $TERMINAL).
-func Open(primaryPath string, extraPaths []string, terminal string) error {
+// on Linux, any executable name (overrides $TERMINAL). tokenName selects a
+// saved curspace Claude token and exposes it to Claude as ANTHROPIC_API_KEY.
+func Open(primaryPath string, extraPaths []string, terminal string, tokenName string) error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude command not found. Install Claude Code CLI and ensure 'claude' is in your PATH")
 	}
 
-	shellCmd := buildShellCommand(primaryPath, extraPaths)
+	shellCmd := buildShellCommand(primaryPath, extraPaths, tokenName)
 
 	switch runtime.GOOS {
 	case "darwin":
@@ -29,16 +30,37 @@ func Open(primaryPath string, extraPaths []string, terminal string) error {
 	}
 }
 
-func buildShellCommand(primaryPath string, extraPaths []string) string {
+func buildShellCommand(primaryPath string, extraPaths []string, tokenName string) string {
 	var b strings.Builder
 	b.WriteString("cd ")
 	b.WriteString(shellQuote(primaryPath))
-	b.WriteString(" && claude")
+	b.WriteString(" && ")
+	hasToken := strings.TrimSpace(tokenName) != ""
+	if hasToken {
+		b.WriteString("(")
+		b.WriteString("ANTHROPIC_API_KEY=\"$(")
+		b.WriteString(shellQuote(curspaceExecutable()))
+		b.WriteString(" claude token print ")
+		b.WriteString(shellQuote(tokenName))
+		b.WriteString(")\" && export ANTHROPIC_API_KEY && ")
+	}
+	b.WriteString("claude")
 	for _, p := range extraPaths {
 		b.WriteString(" --add-dir ")
 		b.WriteString(shellQuote(p))
 	}
+	if hasToken {
+		b.WriteString(")")
+	}
 	return b.String()
+}
+
+func curspaceExecutable() string {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		return "curspace"
+	}
+	return exe
 }
 
 func openOnDarwin(shellCmd, terminal string) error {

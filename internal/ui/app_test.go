@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/frknikiz/curspace/internal/config"
 	"github.com/frknikiz/curspace/internal/discovery"
 	"github.com/frknikiz/curspace/internal/scanner"
 )
@@ -187,5 +188,45 @@ func TestSyncRootSuggestionsUsesCurrentInput(t *testing.T) {
 
 	if !slices.Equal(got, want) {
 		t.Fatalf("available suggestions mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestClaudeTokenPickPassesSelectedToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	if err := config.Save(&config.Config{
+		Roots:        []string{},
+		MaxDepth:     10,
+		ClaudeTokens: []config.ClaudeToken{{Name: "work", Value: "sk-ant-work"}},
+	}); err != nil {
+		t.Fatalf("Save config failed: %v", err)
+	}
+
+	var gotToken string
+	m := NewAppModel(AppConfig{
+		OpenClaude: func(primaryPath string, extraPaths []string, tokenName string) error {
+			gotToken = tokenName
+			return nil
+		},
+	})
+	m.editorPick = editorPick{
+		label:       "svc",
+		primaryPath: "/projects/svc",
+		cursor:      1,
+	}
+
+	model, _ := m.runEditorPick()
+	picking := model.(AppModel)
+	if picking.view != viewClaudeTokenPick {
+		t.Fatalf("expected Claude token picker, got %v", picking.view)
+	}
+
+	model, _ = picking.updateClaudeTokenPick(tea.KeyMsg{Type: tea.KeyEnter})
+	done := model.(AppModel)
+	if gotToken != "work" {
+		t.Fatalf("selected token: got %q, want work", gotToken)
+	}
+	if done.statusErr {
+		t.Fatalf("expected successful status, got %q", done.statusMsg)
 	}
 }
