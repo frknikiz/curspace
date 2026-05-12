@@ -29,13 +29,14 @@ var rootCmd = &cobra.Command{
 			MaxDepth:      cfg.MaxDepth,
 			Terminal:      cfg.Terminal,
 			DefaultEditor: cfg.DefaultEditor,
+			ClaudeTokens:  cfg.ClaudeTokens,
 			OpenCursor:    cursor.Open,
-			OpenClaude: func(primaryPath string, extraPaths []string) error {
+			OpenClaude: func(primaryPath string, extraPaths []string, tokenName string) error {
 				current, err := config.Load()
 				if err != nil {
 					return err
 				}
-				return claude.Open(primaryPath, extraPaths, current.Terminal)
+				return claude.Open(primaryPath, extraPaths, current.Terminal, tokenName)
 			},
 		})
 	},

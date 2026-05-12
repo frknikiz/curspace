@@ -37,6 +37,7 @@ It discovers every project under the directories you configure, presents them in
 - **Open single project** &mdash; Pick any discovered project and open it directly in Cursor or Claude, no workspace file needed.
 - **Instant open** &mdash; Creates a `.code-workspace` file and launches your editor (Cursor or Claude Code) in one step.
 - **Editor picker** &mdash; Every open action prompts for Cursor or Claude; Claude launches `claude` in the primary folder with all other folders added via `--add-dir`.
+- **Claude token picker** &mdash; Save named Claude API tokens and pick one after choosing Claude; curspace sets `ANTHROPIC_API_KEY` only for that Claude launch.
 - **Workspace hub** &mdash; List, reopen, rename, and delete saved workspaces from the same TUI.
 - **Path autocomplete** &mdash; Tab-complete directories when adding scan roots.
 - **Scan caching** &mdash; Reuses previous discovery results for sub-second startup.
@@ -89,10 +90,11 @@ Running `curspace` without arguments opens the interactive workspace hub where y
 | `d` | Delete workspace |
 | `r` | Rename workspace |
 | `a` | Add a new project root |
-| `s` | Open settings (terminal + default editor) |
+| `s` | Open settings (terminal, default editor, Claude tokens) |
 | `q` | Quit |
 
 When you trigger an open action, a small picker asks whether to launch **Cursor** (`c`) or **Claude Code** (`l`).
+If saved Claude tokens exist, choosing Claude opens a second picker for the token to use.
 
 ### Open (one-shot)
 
@@ -125,6 +127,21 @@ curspace workspace open <name> --editor claude   # open in Claude Code
 curspace workspace delete <name>                 # delete workspace file
 curspace workspace rename <old> <new>            # rename a workspace
 ```
+
+### Claude tokens
+
+Saved Claude tokens live in `~/.curspace/config.json` with the rest of the curspace config. The config file is written with `0600` permissions.
+
+From the hub, press `s`, open **Claude tokens**, then press `a` to add a named token or `d` to remove the selected token.
+
+```bash
+curspace claude token add work          # prompts for the token
+curspace claude token add personal sk-ant-...
+curspace claude token list
+curspace claude token remove work
+```
+
+When Claude is launched with a saved token, curspace sets it as `ANTHROPIC_API_KEY` for the Claude process. Choose `current Claude login / environment` in the picker to launch without overriding the current environment.
 
 ## Keyboard Reference
 
@@ -172,7 +189,13 @@ All state lives under `~/.curspace/`:
   ],
   "max_depth": 10,
   "terminal": "iterm",
-  "default_editor": "claude"
+  "default_editor": "claude",
+  "claude_tokens": [
+    {
+      "name": "work",
+      "value": "sk-ant-..."
+    }
+  ]
 }
 ```
 
@@ -182,6 +205,7 @@ All state lives under `~/.curspace/`:
 | `max_depth` | `10` | Maximum directory depth for recursive scanning |
 | `terminal` | auto-detect | Terminal app used to launch Claude Code. macOS: `iterm` or `terminal`. Linux: any executable name (overrides `$TERMINAL`). Leave empty to auto-detect (prefers iTerm if installed/active, else Terminal.app). |
 | `default_editor` | _(empty)_ | Skip the editor picker and always launch this editor. Allowed: `cursor`, `claude`. Leave empty to be asked on every open. |
+| `claude_tokens` | `[]` | Named Claude API tokens available in the Claude token picker. Manage with `curspace claude token ...`. |
 
 Tip: Both `terminal` and `default_editor` can also be edited from the hub (press `s`).
 

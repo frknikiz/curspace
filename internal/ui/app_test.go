@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/frknikiz/curspace/internal/config"
 	"github.com/frknikiz/curspace/internal/discovery"
 	"github.com/frknikiz/curspace/internal/scanner"
 )
@@ -187,5 +189,98 @@ func TestSyncRootSuggestionsUsesCurrentInput(t *testing.T) {
 
 	if !slices.Equal(got, want) {
 		t.Fatalf("available suggestions mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestClaudeTokenPickPassesSelectedToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	if err := config.Save(&config.Config{
+		Roots:        []string{},
+		MaxDepth:     10,
+		ClaudeTokens: []config.ClaudeToken{{Name: "work", Value: "sk-ant-work"}},
+	}); err != nil {
+		t.Fatalf("Save config failed: %v", err)
+	}
+
+	var gotToken string
+	m := NewAppModel(AppConfig{
+		OpenClaude: func(primaryPath string, extraPaths []string, tokenName string) error {
+			gotToken = tokenName
+			return nil
+		},
+	})
+	m.editorPick = editorPick{
+		label:       "svc",
+		primaryPath: "/projects/svc",
+		cursor:      1,
+	}
+
+	model, _ := m.runEditorPick()
+	picking := model.(AppModel)
+	if picking.view != viewClaudeTokenPick {
+		t.Fatalf("expected Claude token picker, got %v", picking.view)
+	}
+
+	model, _ = picking.updateClaudeTokenPick(tea.KeyMsg{Type: tea.KeyEnter})
+	done := model.(AppModel)
+	if gotToken != "work" {
+		t.Fatalf("selected token: got %q, want work", gotToken)
+	}
+	if done.statusErr {
+		t.Fatalf("expected successful status, got %q", done.statusMsg)
+	}
+}
+
+func TestSettingsCanOpenClaudeTokenManager(t *testing.T) {
+	m := NewAppModel(AppConfig{
+		ClaudeTokens: []config.ClaudeToken{{Name: "work", Value: "sk-ant-work"}},
+	})
+	m.view = viewSettings
+	m.settingsCursor = 2
+
+	model, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+	got := model.(AppModel)
+
+	if got.view != viewClaudeTokens {
+		t.Fatalf("expected Claude token manager, got %v", got.view)
+	}
+	if !strings.Contains(got.renderClaudeTokens(), "work") {
+		t.Fatal("expected token manager to render saved token name")
+	}
+}
+
+func TestClaudeTokenManagerSavesTokenFromInputs(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	m := NewAppModel(AppConfig{})
+	m.view = viewClaudeTokenName
+	m.tokenNameInput = newStyledInput("work")
+	m.tokenNameInput.SetValue("work")
+
+	model, _ := m.updateClaudeTokenName(tea.KeyMsg{Type: tea.KeyEnter})
+	valueModel := model.(AppModel)
+	if valueModel.view != viewClaudeTokenValue {
+		t.Fatalf("expected token value input, got %v", valueModel.view)
+	}
+
+	valueModel.tokenValueInput.SetValue("sk-ant-work")
+	model, _ = valueModel.updateClaudeTokenValue(tea.KeyMsg{Type: tea.KeyEnter})
+	done := model.(AppModel)
+
+	if done.view != viewClaudeTokens {
+		t.Fatalf("expected token manager after save, got %v", done.view)
+	}
+	if len(done.claudeTokens) != 1 || done.claudeTokens[0].Name != "work" {
+		t.Fatalf("expected saved token in model, got %#v", done.claudeTokens)
+	}
+
+	value, err := config.ClaudeTokenValue("work")
+	if err != nil {
+		t.Fatalf("ClaudeTokenValue failed: %v", err)
+	}
+	if value != "sk-ant-work" {
+		t.Fatalf("saved token value: got %q, want sk-ant-work", value)
 	}
 }

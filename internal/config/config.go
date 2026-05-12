@@ -24,6 +24,14 @@ type Config struct {
 	// DefaultEditor skips the editor picker when opening workspaces or projects.
 	// Allowed: "" (always ask), "cursor", "claude".
 	DefaultEditor string `json:"default_editor,omitempty"`
+	// ClaudeTokens stores named API keys that can be selected before launching
+	// Claude Code. Values are written to config.json, which is saved as 0600.
+	ClaudeTokens []ClaudeToken `json:"claude_tokens,omitempty"`
+}
+
+type ClaudeToken struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 func DefaultConfig() *Config {
@@ -100,7 +108,7 @@ func Save(cfg *Config) error {
 	}
 
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
 
@@ -110,6 +118,78 @@ func Save(cfg *Config) error {
 	}
 
 	return nil
+}
+
+func SetClaudeToken(name, value string) error {
+	name = strings.TrimSpace(name)
+	value = strings.TrimSpace(value)
+	if name == "" {
+		return fmt.Errorf("token name cannot be empty")
+	}
+	if value == "" {
+		return fmt.Errorf("token value cannot be empty")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		return err
+	}
+
+	for i, token := range cfg.ClaudeTokens {
+		if token.Name == name {
+			cfg.ClaudeTokens[i].Value = value
+			return Save(cfg)
+		}
+	}
+
+	cfg.ClaudeTokens = append(cfg.ClaudeTokens, ClaudeToken{Name: name, Value: value})
+	return Save(cfg)
+}
+
+func RemoveClaudeToken(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("token name cannot be empty")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		return err
+	}
+
+	found := false
+	cfg.ClaudeTokens = slices.DeleteFunc(cfg.ClaudeTokens, func(token ClaudeToken) bool {
+		if token.Name == name {
+			found = true
+			return true
+		}
+		return false
+	})
+	if !found {
+		return fmt.Errorf("claude token not found: %s", name)
+	}
+
+	return Save(cfg)
+}
+
+func ClaudeTokenValue(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("token name cannot be empty")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		return "", err
+	}
+
+	for _, token := range cfg.ClaudeTokens {
+		if token.Name == name {
+			return token.Value, nil
+		}
+	}
+
+	return "", fmt.Errorf("claude token not found: %s", name)
 }
 
 func NormalizePath(path string) (string, error) {
