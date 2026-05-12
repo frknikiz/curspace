@@ -27,18 +27,18 @@ import (
 type appView int
 
 const (
-	viewMain       appView = iota // workspace dashboard
-	viewScanning                  // spinner while scanning
-	viewSelector                  // project multi-select
-	viewOrdering                  // drag-to-reorder selected projects
-	viewNaming                    // workspace name input
-	viewAddRoot                   // add root directory input
-	viewEditorPick                // choose between Cursor and Claude
-	viewClaudeTokenPick           // choose a saved Claude token
-	viewSettings                  // terminal & default editor preferences
-	viewClaudeTokens              // manage saved Claude tokens
-	viewClaudeTokenName           // input Claude token name
-	viewClaudeTokenValue          // input Claude token value
+	viewMain             appView = iota // workspace dashboard
+	viewScanning                        // spinner while scanning
+	viewSelector                        // project multi-select
+	viewOrdering                        // drag-to-reorder selected projects
+	viewNaming                          // workspace name input
+	viewAddRoot                         // add root directory input
+	viewEditorPick                      // choose between Cursor and Claude
+	viewClaudeTokenPick                 // choose a saved Claude token
+	viewSettings                        // terminal & default editor preferences
+	viewClaudeTokens                    // manage saved Claude tokens
+	viewClaudeTokenName                 // input Claude token name
+	viewClaudeTokenValue                // input Claude token value
 )
 
 // settings option cycles
@@ -1323,9 +1323,10 @@ func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *AppModel) cycleSettingsValue(delta int) {
-	if m.settingsCursor == 0 {
+	switch m.settingsCursor {
+	case 0:
 		m.settingsTerminal = cycleSettingsOption(settingsTerminalOptions, m.settingsTerminal, delta)
-	} else if m.settingsCursor == 1 {
+	case 1:
 		m.settingsEditor = cycleSettingsOption(settingsEditorOptions, m.settingsEditor, delta)
 	}
 }
