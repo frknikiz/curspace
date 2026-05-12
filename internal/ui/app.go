@@ -36,6 +36,9 @@ const (
 	viewEditorPick                // choose between Cursor and Claude
 	viewClaudeTokenPick           // choose a saved Claude token
 	viewSettings                  // terminal & default editor preferences
+	viewClaudeTokens              // manage saved Claude tokens
+	viewClaudeTokenName           // input Claude token name
+	viewClaudeTokenValue          // input Claude token value
 )
 
 // settings option cycles
@@ -280,9 +283,14 @@ type AppModel struct {
 	claudeTokenPick claudeTokenPick
 
 	// settings
-	settingsCursor   int    // 0 = terminal, 1 = default editor
+	settingsCursor   int    // 0 = terminal, 1 = default editor, 2 = Claude tokens
 	settingsTerminal string // pending edit value
 	settingsEditor   string // pending edit value
+	tokenCursor      int
+	tokenNameInput   textinput.Model
+	tokenValueInput  textinput.Model
+	pendingTokenName string
+	confirmingToken  bool
 
 	// terminal
 	width  int
@@ -549,6 +557,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateClaudeTokenPick(msg)
 	case viewSettings:
 		return m.updateSettings(msg)
+	case viewClaudeTokens:
+		return m.updateClaudeTokens(msg)
+	case viewClaudeTokenName:
+		return m.updateClaudeTokenName(msg)
+	case viewClaudeTokenValue:
+		return m.updateClaudeTokenValue(msg)
 	}
 
 	return m, nil
@@ -668,6 +682,7 @@ func (m AppModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsTerminal = m.terminal
 			m.settingsEditor = m.defaultEditor
 			m.settingsCursor = 0
+			m.tokenCursor = 0
 			m.view = viewSettings
 			return m, nil
 		}
@@ -1265,7 +1280,7 @@ func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsCursor--
 		}
 	case "down", "j":
-		if m.settingsCursor < 1 {
+		if m.settingsCursor < 2 {
 			m.settingsCursor++
 		}
 	case "left", "h":
@@ -1273,6 +1288,15 @@ func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "right", "l", "tab", " ":
 		m.cycleSettingsValue(1)
 	case "enter":
+		if m.settingsCursor == 2 {
+			m.view = viewClaudeTokens
+			m.confirmingToken = false
+			m.statusMsg = ""
+			if m.tokenCursor >= len(m.claudeTokens) {
+				m.tokenCursor = max(0, len(m.claudeTokens)-1)
+			}
+			return m, nil
+		}
 		cfg, err := config.Load()
 		if err != nil {
 			m.statusMsg = err.Error()
@@ -1301,7 +1325,7 @@ func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *AppModel) cycleSettingsValue(delta int) {
 	if m.settingsCursor == 0 {
 		m.settingsTerminal = cycleSettingsOption(settingsTerminalOptions, m.settingsTerminal, delta)
-	} else {
+	} else if m.settingsCursor == 1 {
 		m.settingsEditor = cycleSettingsOption(settingsEditorOptions, m.settingsEditor, delta)
 	}
 }
@@ -1340,16 +1364,19 @@ func (m AppModel) renderSettings() string {
 	var s []string
 	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("settings"))
 	s = append(s, "")
-	s = append(s, "  "+appMutedHintStyle.Render("Persisted to ~/.curspace/config.json. Use ←/→ to change a value, ↵ to save."))
+	s = append(s, "  "+appMutedHintStyle.Render("Persisted to ~/.curspace/config.json. Use ←/→ to change values, ↵ to save or manage."))
 	s = append(s, "")
 
 	rows := []struct {
 		title   string
 		options []settingsOption
 		value   string
+		summary string
+		hint    string
 	}{
-		{"Terminal", settingsTerminalOptions, m.settingsTerminal},
-		{"Default editor", settingsEditorOptions, m.settingsEditor},
+		{"Terminal", settingsTerminalOptions, m.settingsTerminal, "", ""},
+		{"Default editor", settingsEditorOptions, m.settingsEditor, "", ""},
+		{"Claude tokens", nil, "", fmt.Sprintf("%d saved", len(m.claudeTokens)), "press enter to add, remove, or review saved token names"},
 	}
 
 	for i, row := range rows {
@@ -1364,8 +1391,12 @@ func (m AppModel) renderSettings() string {
 			title = appSelectedNameStyle.Render(row.title)
 		}
 
-		valueLabel := settingsLabelFor(row.options, row.value)
-		hint := settingsHintFor(row.options, row.value)
+		valueLabel := row.summary
+		hint := row.hint
+		if row.options != nil {
+			valueLabel = settingsLabelFor(row.options, row.value)
+			hint = settingsHintFor(row.options, row.value)
+		}
 		valueStyled := appHelpKeyStyle.Render("[ " + valueLabel + " ]")
 		s = append(s, fmt.Sprintf("  %s%-18s  %s", cur, title, valueStyled))
 		s = append(s, "      "+appDetailStyle.Render(hint))
@@ -1375,10 +1406,226 @@ func (m AppModel) renderSettings() string {
 	items := []struct{ key, desc string }{
 		{"↑↓", "row"},
 		{"←→", "value"},
-		{"↵", "save"},
+		{"↵", "save/manage"},
 		{"esc", "cancel"},
 	}
 	s = append(s, "  "+renderHelp(items))
+	return appPadding.Render(strings.Join(s, "\n"))
+}
+
+func (m AppModel) updateClaudeTokens(msg tea.Msg) (tea.Model, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	if m.confirmingToken {
+		switch km.String() {
+		case "y", "Y":
+			if len(m.claudeTokens) > 0 && m.tokenCursor < len(m.claudeTokens) {
+				name := m.claudeTokens[m.tokenCursor].Name
+				if err := config.RemoveClaudeToken(name); err != nil {
+					m.statusMsg = err.Error()
+					m.statusErr = true
+				} else {
+					_ = m.refreshConfig()
+					if m.tokenCursor >= len(m.claudeTokens) {
+						m.tokenCursor = max(0, len(m.claudeTokens)-1)
+					}
+					m.statusMsg = fmt.Sprintf("Removed Claude token '%s'", name)
+					m.statusErr = false
+				}
+			}
+		}
+		m.confirmingToken = false
+		return m, nil
+	}
+
+	switch km.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "esc":
+		m.view = viewSettings
+		return m, nil
+	case "up", "k":
+		if m.tokenCursor > 0 {
+			m.tokenCursor--
+		}
+	case "down", "j":
+		if m.tokenCursor < len(m.claudeTokens)-1 {
+			m.tokenCursor++
+		}
+	case "a", "enter":
+		m.pendingTokenName = ""
+		ti := newStyledInput("work")
+		ti.Focus()
+		m.tokenNameInput = ti
+		m.view = viewClaudeTokenName
+		return m, textinput.Blink
+	case "d":
+		if len(m.claudeTokens) > 0 {
+			m.confirmingToken = true
+		}
+	}
+
+	return m, nil
+}
+
+func (m AppModel) updateClaudeTokenName(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.Type {
+		case tea.KeyCtrlC:
+			m.quitting = true
+			return m, tea.Quit
+		case tea.KeyEsc:
+			m.view = viewClaudeTokens
+			return m, nil
+		case tea.KeyEnter:
+			name := strings.TrimSpace(m.tokenNameInput.Value())
+			if name == "" {
+				m.statusMsg = "Token name cannot be empty"
+				m.statusErr = true
+				m.view = viewClaudeTokens
+				return m, nil
+			}
+			m.pendingTokenName = name
+			ti := newStyledInput("sk-ant-...")
+			ti.CharLimit = 4096
+			ti.Width = 72
+			ti.Focus()
+			m.tokenValueInput = ti
+			m.view = viewClaudeTokenValue
+			return m, textinput.Blink
+		}
+	}
+
+	var cmd tea.Cmd
+	m.tokenNameInput, cmd = m.tokenNameInput.Update(msg)
+	return m, cmd
+}
+
+func (m AppModel) updateClaudeTokenValue(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.Type {
+		case tea.KeyCtrlC:
+			m.quitting = true
+			return m, tea.Quit
+		case tea.KeyEsc:
+			m.view = viewClaudeTokens
+			return m, nil
+		case tea.KeyEnter:
+			value := strings.TrimSpace(m.tokenValueInput.Value())
+			if err := config.SetClaudeToken(m.pendingTokenName, value); err != nil {
+				m.statusMsg = err.Error()
+				m.statusErr = true
+			} else {
+				_ = m.refreshConfig()
+				m.tokenCursor = tokenIndexByName(m.claudeTokens, m.pendingTokenName)
+				m.statusMsg = fmt.Sprintf("Saved Claude token '%s'", m.pendingTokenName)
+				m.statusErr = false
+			}
+			m.pendingTokenName = ""
+			m.view = viewClaudeTokens
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.tokenValueInput, cmd = m.tokenValueInput.Update(msg)
+	return m, cmd
+}
+
+func tokenIndexByName(tokens []config.ClaudeToken, name string) int {
+	for i, token := range tokens {
+		if token.Name == name {
+			return i
+		}
+	}
+	return 0
+}
+
+func (m AppModel) renderClaudeTokens() string {
+	var s []string
+	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("Claude tokens"))
+	s = append(s, "")
+	s = append(s, "  "+appMutedHintStyle.Render("Token values are saved to ~/.curspace/config.json and are never shown here."))
+	s = append(s, "")
+
+	if len(m.claudeTokens) == 0 {
+		s = append(s, appEmptyStyle.Render("No Claude tokens saved. Press a to add one."))
+	} else {
+		for i, token := range m.claudeTokens {
+			isActive := i == m.tokenCursor
+			cur := "  "
+			if isActive {
+				cur = appCursorStyle.Render("▸ ")
+			}
+			name := appNameStyle.Render(token.Name)
+			if isActive {
+				name = appSelectedNameStyle.Render(token.Name)
+			}
+			s = append(s, fmt.Sprintf("  %s%s  %s", cur, name, appDetailStyle.Render("saved")))
+		}
+	}
+
+	if m.statusMsg != "" {
+		s = append(s, "")
+		style := appStatusOkStyle
+		prefix := "✓"
+		if m.statusErr {
+			style = appStatusErrStyle
+			prefix = "✗"
+		}
+		s = append(s, "  "+style.Render(prefix)+" "+style.Render(m.statusMsg))
+	}
+
+	if m.confirmingToken && len(m.claudeTokens) > 0 && m.tokenCursor < len(m.claudeTokens) {
+		s = append(s, "")
+		s = append(s, "  "+appConfirmStyle.Render(
+			fmt.Sprintf("Remove token '%s'? (y/n)", m.claudeTokens[m.tokenCursor].Name),
+		))
+	}
+
+	s = append(s, "")
+	items := []struct{ key, desc string }{
+		{"a", "add"},
+		{"d", "remove"},
+		{"↑↓", "navigate"},
+		{"esc", "back"},
+	}
+	s = append(s, "  "+renderHelp(items))
+	return appPadding.Render(strings.Join(s, "\n"))
+}
+
+func (m AppModel) renderClaudeTokenName() string {
+	var s []string
+	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("new Claude token"))
+	s = append(s, "")
+	box := inputBoxStyle.Render(fmt.Sprintf("%s\n\n%s", inputLabelStyle.Render("Token name:"), m.tokenNameInput.View()))
+	s = append(s, box)
+	s = append(s, "")
+	s = append(s, "  "+renderHelp([]struct{ key, desc string }{
+		{"↵", "continue"},
+		{"esc", "cancel"},
+	}))
+	return appPadding.Render(strings.Join(s, "\n"))
+}
+
+func (m AppModel) renderClaudeTokenValue() string {
+	var s []string
+	s = append(s, appTitleStyle.Render(" CURSPACE ")+"  "+appSubtitleStyle.Render("new Claude token"))
+	s = append(s, "")
+	label := inputLabelStyle.Render(fmt.Sprintf("Token value for %s:", m.pendingTokenName))
+	box := inputBoxStyle.Render(fmt.Sprintf("%s\n\n%s", label, m.tokenValueInput.View()))
+	s = append(s, box)
+	s = append(s, "")
+	s = append(s, "  "+appMutedHintStyle.Render("The value will be saved, then hidden from token lists."))
+	s = append(s, "")
+	s = append(s, "  "+renderHelp([]struct{ key, desc string }{
+		{"↵", "save"},
+		{"esc", "cancel"},
+	}))
 	return appPadding.Render(strings.Join(s, "\n"))
 }
 
@@ -1463,6 +1710,12 @@ func (m AppModel) View() string {
 		return m.renderClaudeTokenPick()
 	case viewSettings:
 		return m.renderSettings()
+	case viewClaudeTokens:
+		return m.renderClaudeTokens()
+	case viewClaudeTokenName:
+		return m.renderClaudeTokenName()
+	case viewClaudeTokenValue:
+		return m.renderClaudeTokenValue()
 	}
 
 	return ""

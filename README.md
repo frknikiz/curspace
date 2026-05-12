@@ -90,7 +90,7 @@ Running `curspace` without arguments opens the interactive workspace hub where y
 | `d` | Delete workspace |
 | `r` | Rename workspace |
 | `a` | Add a new project root |
-| `s` | Open settings (terminal + default editor) |
+| `s` | Open settings (terminal, default editor, Claude tokens) |
 | `q` | Quit |
 
 When you trigger an open action, a small picker asks whether to launch **Cursor** (`c`) or **Claude Code** (`l`).
@@ -131,6 +131,8 @@ curspace workspace rename <old> <new>            # rename a workspace
 ### Claude tokens
 
 Saved Claude tokens live in `~/.curspace/config.json` with the rest of the curspace config. The config file is written with `0600` permissions.
+
+From the hub, press `s`, open **Claude tokens**, then press `a` to add a named token or `d` to remove the selected token.
 
 ```bash
 curspace claude token add work          # prompts for the token
