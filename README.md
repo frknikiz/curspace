@@ -37,7 +37,7 @@ It discovers every project under the directories you configure, presents them in
 - **Open single project** &mdash; Pick any discovered project and open it directly in Cursor or Claude, no workspace file needed.
 - **Instant open** &mdash; Creates a `.code-workspace` file and launches your editor (Cursor or Claude Code) in one step.
 - **Editor picker** &mdash; Every open action prompts for Cursor or Claude; Claude launches `claude` in the primary folder with all other folders added via `--add-dir`.
-- **Claude token picker** &mdash; Save named Claude API tokens and pick one after choosing Claude; curspace sets `ANTHROPIC_API_KEY` only for that Claude launch.
+- **Claude token picker** &mdash; Save named Claude API tokens and pick one after choosing Claude; curspace sets `ANTHROPIC_AUTH_TOKEN` only for that Claude launch.
 - **Workspace hub** &mdash; List, reopen, rename, and delete saved workspaces from the same TUI.
 - **Path autocomplete** &mdash; Tab-complete directories when adding scan roots.
 - **Scan caching** &mdash; Reuses previous discovery results for sub-second startup.
@@ -141,7 +141,7 @@ curspace claude token list
 curspace claude token remove work
 ```
 
-When Claude is launched with a saved token, curspace sets it as `ANTHROPIC_API_KEY` for the Claude process. Choose `current Claude login / environment` in the picker to launch without overriding the current environment.
+When Claude is launched with a saved token, curspace sets it as `ANTHROPIC_AUTH_TOKEN` for the Claude process. Choose `current Claude login / environment` in the picker to launch without overriding the current environment.
 
 ## Keyboard Reference
 

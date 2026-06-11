@@ -1235,7 +1235,7 @@ func (m AppModel) renderClaudeTokenPick() string {
 		if isActive {
 			name = appSelectedNameStyle.Render(token.Name)
 		}
-		s = append(s, fmt.Sprintf("  %s%s  %s", cur, name, appDetailStyle.Render("set ANTHROPIC_API_KEY")))
+		s = append(s, fmt.Sprintf("  %s%s  %s", cur, name, appDetailStyle.Render("set ANTHROPIC_AUTH_TOKEN")))
 	}
 
 	noTokenIdx := len(m.claudeTokens)

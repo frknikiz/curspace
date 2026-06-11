@@ -12,7 +12,7 @@ import (
 // directories via --add-dir flags. terminal selects the host terminal app:
 // "" / "auto" → auto-detect; "iterm" / "iterm2"; "terminal" (Terminal.app);
 // on Linux, any executable name (overrides $TERMINAL). tokenName selects a
-// saved curspace Claude token and exposes it to Claude as ANTHROPIC_API_KEY.
+// saved curspace Claude token and exposes it to Claude as ANTHROPIC_AUTH_TOKEN.
 func Open(primaryPath string, extraPaths []string, terminal string, tokenName string) error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude command not found. Install Claude Code CLI and ensure 'claude' is in your PATH")
@@ -38,11 +38,11 @@ func buildShellCommand(primaryPath string, extraPaths []string, tokenName string
 	hasToken := strings.TrimSpace(tokenName) != ""
 	if hasToken {
 		b.WriteString("(")
-		b.WriteString("ANTHROPIC_API_KEY=\"$(")
+		b.WriteString("ANTHROPIC_AUTH_TOKEN=\"$(")
 		b.WriteString(shellQuote(curspaceExecutable()))
 		b.WriteString(" claude token print ")
 		b.WriteString(shellQuote(tokenName))
-		b.WriteString(")\" && export ANTHROPIC_API_KEY && ")
+		b.WriteString(")\" && export ANTHROPIC_AUTH_TOKEN && ")
 	}
 	b.WriteString("claude")
 	for _, p := range extraPaths {
