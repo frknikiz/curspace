@@ -9,12 +9,12 @@
 <h1 align="center">curspace</h1>
 
 <p align="center">
-  <strong>Terminal-first project discovery and workspace launcher for <a href="https://cursor.sh">Cursor IDE</a> and <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a></strong>
+  <strong>Terminal-first project discovery and workspace launcher for <a href="https://cursor.sh">Cursor IDE</a>, <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>, and <a href="https://developers.openai.com/codex/cli">Codex CLI</a></strong>
 </p>
 
 <p align="center">
   Scan your filesystem for projects, pick what you need in a fast TUI,<br>
-  arrange the folder order, and open everything as a multi-root workspace in Cursor &mdash; or fire up Claude Code in the primary folder with the rest attached via <code>--add-dir</code>.
+  arrange the folder order, and open everything as a multi-root workspace in Cursor &mdash; or fire up Claude Code or Codex CLI in the primary folder with the rest attached via <code>--add-dir</code>.
 </p>
 
 ---
@@ -27,17 +27,18 @@ If you juggle dozens of repositories every day, creating multi-root workspaces b
 curspace
 ```
 
-It discovers every project under the directories you configure, presents them in a filterable list, lets you reorder them (the first folder becomes the primary workspace root), names the workspace, and opens it in your editor of choice &mdash; Cursor or Claude Code.
+It discovers every project under the directories you configure, presents them in a filterable list, lets you reorder them (the first folder becomes the primary workspace root), names the workspace, and opens it in your editor of choice &mdash; Cursor, Claude Code, or Codex CLI.
 
 ## Features
 
 - **Auto-discovery** &mdash; Recursively detects Go, Node, Java, Python, Rust, .NET, PHP, and Git projects by their marker files.
 - **Interactive TUI** &mdash; Fuzzy filter, multi-select, rescan, and continue without leaving the terminal.
 - **Drag-to-reorder** &mdash; Arrange the selected projects before saving; the first item becomes the primary workspace folder.
-- **Open single project** &mdash; Pick any discovered project and open it directly in Cursor or Claude, no workspace file needed.
-- **Instant open** &mdash; Creates a `.code-workspace` file and launches your editor (Cursor or Claude Code) in one step.
-- **Editor picker** &mdash; Every open action prompts for Cursor or Claude; Claude launches `claude` in the primary folder with all other folders added via `--add-dir`.
+- **Open single project** &mdash; Pick any discovered project and open it directly in Cursor, Claude, or Codex, no workspace file needed.
+- **Instant open** &mdash; Creates a `.code-workspace` file and launches your editor (Cursor, Claude Code, or Codex CLI) in one step.
+- **Editor picker** &mdash; Every open action prompts for Cursor, Claude, or Codex; the CLI tools launch `claude` or `codex` in the primary folder with all other folders added via `--add-dir`.
 - **Claude token picker** &mdash; Save named Claude API tokens and pick one after choosing Claude; curspace sets `ANTHROPIC_AUTH_TOKEN` only for that Claude launch.
+- **LiteLLM model picker** &mdash; Configure one LiteLLM proxy URL in settings; Claude and Codex fetch the proxy's OpenAI-compatible `/v1/models` catalog after token selection and let you choose the model. Cursor is unchanged.
 - **Workspace hub** &mdash; List, reopen, rename, and delete saved workspaces from the same TUI.
 - **Path autocomplete** &mdash; Tab-complete directories when adding scan roots.
 - **Scan caching** &mdash; Reuses previous discovery results for sub-second startup.
@@ -90,17 +91,18 @@ Running `curspace` without arguments opens the interactive workspace hub where y
 | `d` | Delete workspace |
 | `r` | Rename workspace |
 | `a` | Add a new project root |
-| `s` | Open settings (terminal, default editor, Claude tokens) |
+| `s` | Open settings (terminal, default editor, Claude/Codex tokens) |
 | `q` | Quit |
 
-When you trigger an open action, a small picker asks whether to launch **Cursor** (`c`) or **Claude Code** (`l`).
-If saved Claude tokens exist, choosing Claude opens a second picker for the token to use.
+When you trigger an open action, a small picker asks whether to launch **Cursor** (`c`), **Claude Code** (`l`), or **Codex CLI** (`x`).
+If saved Claude or Codex tokens exist, choosing that tool opens a token picker followed by a model picker when a LiteLLM URL is configured.
 
 ### Open (one-shot)
 
 ```bash
 curspace open                       # scan, select, order, name, open in Cursor
 curspace open --editor claude       # same flow, but launch Claude Code
+curspace open --editor codex        # same flow, but launch Codex CLI
 curspace open --refresh             # force rescan, bypass cache
 ```
 
@@ -124,9 +126,31 @@ curspace scan                  # scan and print discovered projects
 curspace workspace list                          # list saved workspaces
 curspace workspace open <name>                   # open in Cursor (default)
 curspace workspace open <name> --editor claude   # open in Claude Code
+curspace workspace open <name> --editor codex    # open in Codex CLI
 curspace workspace delete <name>                 # delete workspace file
 curspace workspace rename <old> <new>            # rename a workspace
 ```
+
+### Codex CLI
+
+Install [Codex CLI](https://developers.openai.com/codex/cli) and ensure `codex` is on your `PATH`. Curspace launches it in the selected terminal. When saved Codex tokens exist, an additional picker lets you choose an OpenAI API key or keep the current Codex login / environment, including when Codex is the default editor.
+
+Choose **Codex CLI** with `x` in the editor picker, or set **Default editor** to `codex` in hub settings (`s`). The first selected folder is the working directory; each remaining folder is passed with `--add-dir`. For multiple folders, curspace also passes `--sandbox workspace-write` so Codex permits the additional writable roots. Single-folder launches retain Codex's configured sandbox policy ([CLI reference](https://developers.openai.com/codex/cli/reference)).
+
+For a LiteLLM proxy, open settings (`s`) and set **LiteLLM base URL** (for example `https://llm.example.com`; `/v1` is optional). Curspace requests `GET /v1/models` with the selected token, displays the returned model IDs, and passes the selected model to Codex. Type in the model screen to filter the list. Set **Default Codex model** from that same picker to make a model the initial highlighted choice.
+
+### Codex tokens
+
+From hub settings (`s`), open **Codex tokens** and press `a` to add a named OpenAI API key or `d` to remove one. Token input is masked in the TUI.
+
+```bash
+curspace codex token add work          # prompts for the API key
+curspace codex token list              # names only
+curspace codex token remove work
+curspace open --editor codex           # select a saved token or current login
+```
+
+Tokens are stored in `~/.curspace/config.json` as `codex_tokens` with `0600` file permissions. Selecting a token uses an invocation-only OpenAI API provider configured through Codex's [provider environment key support](https://developers.openai.com/codex/config-reference). The value is read at launch and passed in the child environment, not embedded in terminal commands. Your saved Codex login is unchanged. These tokens are OpenAI API keys, not ChatGPT session tokens.
 
 ### Claude tokens
 
@@ -142,6 +166,8 @@ curspace claude token remove work
 ```
 
 When Claude is launched with a saved token, curspace sets it as `ANTHROPIC_AUTH_TOKEN` for the Claude process. Choose `current Claude login / environment` in the picker to launch without overriding the current environment.
+
+With a LiteLLM base URL configured, Claude uses the same model catalog and receives the selected model through `--model`; the proxy URL is exported as `ANTHROPIC_BASE_URL`. Set **Default Claude model** from the same searchable model picker to choose the initial highlighted entry.
 
 ## Keyboard Reference
 
@@ -190,6 +216,9 @@ All state lives under `~/.curspace/`:
   "max_depth": 10,
   "terminal": "iterm",
   "default_editor": "claude",
+  "litellm_base_url": "https://llm.example.com",
+  "claude_model": "claude-sonnet",
+  "codex_model": "gpt-5",
   "claude_tokens": [
     {
       "name": "work",
@@ -203,11 +232,15 @@ All state lives under `~/.curspace/`:
 |-------|---------|-------------|
 | `roots` | `[]` | Directories to scan for projects |
 | `max_depth` | `10` | Maximum directory depth for recursive scanning |
-| `terminal` | auto-detect | Terminal app used to launch Claude Code. macOS: `iterm` or `terminal`. Linux: any executable name (overrides `$TERMINAL`). Leave empty to auto-detect (prefers iTerm if installed/active, else Terminal.app). |
-| `default_editor` | _(empty)_ | Skip the editor picker and always launch this editor. Allowed: `cursor`, `claude`. Leave empty to be asked on every open. |
+| `terminal` | auto-detect | Terminal app used to launch Claude Code or Codex CLI. macOS: `iterm` or `terminal`. Linux: any executable name (overrides `$TERMINAL`). Leave empty to auto-detect (prefers iTerm if installed/active, else Terminal.app). |
+| `default_editor` | _(empty)_ | Skip the editor picker and always launch this editor. Allowed: `cursor`, `claude`, `codex`. Leave empty to be asked on every open. |
+| `litellm_base_url` | _(empty)_ | LiteLLM/OpenAI-compatible proxy URL used for Claude and Codex model discovery. `/v1` is optional. |
+| `claude_model` | _(empty)_ | Optional default Claude model; it is highlighted when the proxy catalog contains it. |
+| `codex_model` | _(empty)_ | Optional default Codex model; it is highlighted when the proxy catalog contains it. |
+| `codex_tokens` | `[]` | Named OpenAI API keys available in the Codex token picker. Manage with `curspace codex token ...`. |
 | `claude_tokens` | `[]` | Named Claude API tokens available in the Claude token picker. Manage with `curspace claude token ...`. |
 
-Tip: Both `terminal` and `default_editor` can also be edited from the hub (press `s`).
+Tip: `terminal`, `default_editor`, the LiteLLM URL, and default models can be edited from the hub (press `s`).
 
 ## Supported Project Types
 
@@ -246,7 +279,9 @@ curspace/
 │   ├── cache/                 # scan result caching
 │   ├── config/                # ~/.curspace/config.json
 │   ├── cursor/                # Cursor IDE launcher
-│   └── claude/                # Claude Code launcher (Terminal + --add-dir)
+│   ├── claude/                # Claude Code launcher
+│   ├── codex/                 # Codex CLI launcher
+│   └── terminal/              # shared macOS/Linux terminal launching
 ├── .goreleaser.yaml
 ├── LICENSE
 └── README.md

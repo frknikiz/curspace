@@ -17,19 +17,33 @@ const (
 type Config struct {
 	Roots    []string `json:"roots"`
 	MaxDepth int      `json:"max_depth"`
-	// Terminal selects the macOS/Linux terminal app used to launch Claude Code.
+	// Terminal selects the macOS/Linux terminal app used to launch Claude Code or Codex CLI.
 	// Leave empty for auto-detect. Supported values: "iterm", "terminal" (macOS),
 	// or any executable name on Linux (overrides $TERMINAL).
 	Terminal string `json:"terminal,omitempty"`
 	// DefaultEditor skips the editor picker when opening workspaces or projects.
-	// Allowed: "" (always ask), "cursor", "claude".
+	// Allowed: "" (always ask), "cursor", "claude", "codex".
 	DefaultEditor string `json:"default_editor,omitempty"`
 	// ClaudeTokens stores named API keys that can be selected before launching
 	// Claude Code. Values are written to config.json, which is saved as 0600.
 	ClaudeTokens []ClaudeToken `json:"claude_tokens,omitempty"`
+	// CodexTokens stores named OpenAI API keys in the private config file.
+	CodexTokens []CodexToken `json:"codex_tokens,omitempty"`
+	// LiteLLMBaseURL is an OpenAI-compatible LiteLLM proxy URL. A /v1 suffix
+	// is optional; curspace adds it when querying the model catalog.
+	LiteLLMBaseURL string `json:"litellm_base_url,omitempty"`
+	// ClaudeModel and CodexModel are optional defaults used when the proxy
+	// model catalog is unavailable or when no model picker is needed.
+	ClaudeModel string `json:"claude_model,omitempty"`
+	CodexModel  string `json:"codex_model,omitempty"`
 }
 
 type ClaudeToken struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type CodexToken struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
@@ -190,6 +204,78 @@ func ClaudeTokenValue(name string) (string, error) {
 	}
 
 	return "", fmt.Errorf("claude token not found: %s", name)
+}
+
+func SetCodexToken(name, value string) error {
+	name = strings.TrimSpace(name)
+	value = strings.TrimSpace(value)
+	if name == "" {
+		return fmt.Errorf("token name cannot be empty")
+	}
+	if value == "" {
+		return fmt.Errorf("token value cannot be empty")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		return err
+	}
+
+	for i, token := range cfg.CodexTokens {
+		if token.Name == name {
+			cfg.CodexTokens[i].Value = value
+			return Save(cfg)
+		}
+	}
+
+	cfg.CodexTokens = append(cfg.CodexTokens, CodexToken{Name: name, Value: value})
+	return Save(cfg)
+}
+
+func RemoveCodexToken(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("token name cannot be empty")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		return err
+	}
+
+	found := false
+	cfg.CodexTokens = slices.DeleteFunc(cfg.CodexTokens, func(token CodexToken) bool {
+		if token.Name == name {
+			found = true
+			return true
+		}
+		return false
+	})
+	if !found {
+		return fmt.Errorf("codex token not found: %s", name)
+	}
+
+	return Save(cfg)
+}
+
+func CodexTokenValue(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("token name cannot be empty")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		return "", err
+	}
+
+	for _, token := range cfg.CodexTokens {
+		if token.Name == name {
+			return token.Value, nil
+		}
+	}
+
+	return "", fmt.Errorf("codex token not found: %s", name)
 }
 
 func NormalizePath(path string) (string, error) {

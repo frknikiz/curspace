@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/frknikiz/curspace/internal/config"
 	"github.com/frknikiz/curspace/internal/discovery"
+	"github.com/frknikiz/curspace/internal/litellm"
 	"github.com/frknikiz/curspace/internal/scanner"
 	"github.com/frknikiz/curspace/internal/workspace"
 )
@@ -27,18 +28,26 @@ import (
 type appView int
 
 const (
-	viewMain             appView = iota // workspace dashboard
-	viewScanning                        // spinner while scanning
-	viewSelector                        // project multi-select
-	viewOrdering                        // drag-to-reorder selected projects
-	viewNaming                          // workspace name input
-	viewAddRoot                         // add root directory input
-	viewEditorPick                      // choose between Cursor and Claude
-	viewClaudeTokenPick                 // choose a saved Claude token
-	viewSettings                        // terminal & default editor preferences
-	viewClaudeTokens                    // manage saved Claude tokens
-	viewClaudeTokenName                 // input Claude token name
-	viewClaudeTokenValue                // input Claude token value
+	viewMain            appView = iota // workspace dashboard
+	viewScanning                       // spinner while scanning
+	viewSelector                       // project multi-select
+	viewOrdering                       // drag-to-reorder selected projects
+	viewNaming                         // workspace name input
+	viewAddRoot                        // add root directory input
+	viewEditorPick                     // choose between Cursor, Claude, and Codex
+	viewClaudeTokenPick                // choose a saved Claude token
+	viewCodexTokenPick
+	viewClaudeModelPick
+	viewCodexModelPick
+	viewModelLoading
+	viewCodexTokens
+	viewCodexTokenName
+	viewCodexTokenValue
+	viewSettings         // terminal & default editor preferences
+	viewClaudeTokens     // manage saved Claude tokens
+	viewClaudeTokenName  // input Claude token name
+	viewClaudeTokenValue // input Claude token value
+	viewSettingsInput    // input LiteLLM URL or default model
 )
 
 // settings option cycles
@@ -52,6 +61,7 @@ var (
 		{value: "", label: "ask", hint: "always show the editor picker"},
 		{value: "cursor", label: "cursor", hint: "skip picker, always open in Cursor"},
 		{value: "claude", label: "claude", hint: "skip picker, always open in Claude Code"},
+		{value: "codex", label: "codex", hint: "skip picker, always open in Codex CLI"},
 	}
 )
 
@@ -233,26 +243,39 @@ type scanDoneMsg struct {
 	err    error
 }
 
+type modelFetchDoneMsg struct {
+	provider string
+	models   []litellm.Model
+	err      error
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Model
 // ═══════════════════════════════════════════════════════════════════
 
 type AppConfig struct {
-	Roots         []string
-	MaxDepth      int
-	Terminal      string
-	DefaultEditor string
-	ClaudeTokens  []config.ClaudeToken
-	OpenCursor    func(string) error
-	OpenClaude    func(primaryPath string, extraPaths []string, tokenName string) error
+	Roots               []string
+	MaxDepth            int
+	Terminal            string
+	DefaultEditor       string
+	ClaudeTokens        []config.ClaudeToken
+	CodexTokens         []config.CodexToken
+	LiteLLMBaseURL      string
+	ClaudeModel         string
+	CodexModel          string
+	OpenCursor          func(string) error
+	OpenCodex           func(primaryPath string, extraPaths []string, tokenName string) error
+	OpenClaude          func(primaryPath string, extraPaths []string, tokenName string) error
+	OpenCodexWithModel  func(primaryPath string, extraPaths []string, tokenName, model string) error
+	OpenClaudeWithModel func(primaryPath string, extraPaths []string, tokenName, model string) error
 }
 
 type editorPick struct {
 	label       string // workspace name or project name shown in status
-	primaryPath string // first folder for Claude / workspace file for Cursor
+	primaryPath string // first folder for Claude or Codex / workspace file for Cursor
 	extraPaths  []string
 	cursorPath  string // path passed to OpenCursor (workspace file or project dir)
-	cursor      int    // 0 = Cursor, 1 = Claude
+	cursor      int    // 0 = Cursor, 1 = Claude, 2 = Codex
 }
 
 type claudeTokenPick struct {
@@ -269,28 +292,39 @@ type scanIntent struct {
 }
 
 type AppModel struct {
-	view          appView
-	roots         []string
-	maxDepth      int
-	terminal      string
-	defaultEditor string
-	claudeTokens  []config.ClaudeToken
-	openCursor    func(string) error
-	openClaude    func(primaryPath string, extraPaths []string, tokenName string) error
+	view                appView
+	roots               []string
+	maxDepth            int
+	terminal            string
+	defaultEditor       string
+	claudeTokens        []config.ClaudeToken
+	codexTokens         []config.CodexToken
+	litellmBaseURL      string
+	claudeModel         string
+	codexModel          string
+	openCursor          func(string) error
+	openCodex           func(primaryPath string, extraPaths []string, tokenName string) error
+	openClaude          func(primaryPath string, extraPaths []string, tokenName string) error
+	openCodexWithModel  func(primaryPath string, extraPaths []string, tokenName, model string) error
+	openClaudeWithModel func(primaryPath string, extraPaths []string, tokenName, model string) error
 
 	// editor picker
 	editorPick      editorPick
 	claudeTokenPick claudeTokenPick
+	codexTokenPick  codexTokenPick
+	modelPick       modelPick
 
 	// settings
-	settingsCursor   int    // 0 = terminal, 1 = default editor, 2 = Claude tokens
-	settingsTerminal string // pending edit value
-	settingsEditor   string // pending edit value
-	tokenCursor      int
-	tokenNameInput   textinput.Model
-	tokenValueInput  textinput.Model
-	pendingTokenName string
-	confirmingToken  bool
+	settingsCursor    int    // 0 = terminal, 1 = default editor, 2 = Claude tokens, 3 = Codex tokens, 4-6 = LiteLLM settings
+	settingsTerminal  string // pending edit value
+	settingsEditor    string // pending edit value
+	settingsInput     textinput.Model
+	settingsInputKind int // 4 = LiteLLM URL, 5 = Claude model, 6 = Codex model
+	tokenCursor       int
+	tokenNameInput    textinput.Model
+	tokenValueInput   textinput.Model
+	pendingTokenName  string
+	confirmingToken   bool
 
 	// terminal
 	width  int
@@ -349,17 +383,24 @@ func NewAppModel(cfg AppConfig) AppModel {
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4"))
 
 	return AppModel{
-		view:          viewMain,
-		roots:         cfg.Roots,
-		maxDepth:      cfg.MaxDepth,
-		terminal:      cfg.Terminal,
-		defaultEditor: cfg.DefaultEditor,
-		claudeTokens:  cfg.ClaudeTokens,
-		openCursor:    cfg.OpenCursor,
-		openClaude:    cfg.OpenClaude,
-		spinner:       s,
-		selected:      make(map[int]bool),
-		wsExpanded:    make(map[int]bool),
+		view:                viewMain,
+		roots:               cfg.Roots,
+		maxDepth:            cfg.MaxDepth,
+		terminal:            cfg.Terminal,
+		defaultEditor:       cfg.DefaultEditor,
+		claudeTokens:        cfg.ClaudeTokens,
+		codexTokens:         cfg.CodexTokens,
+		litellmBaseURL:      cfg.LiteLLMBaseURL,
+		claudeModel:         cfg.ClaudeModel,
+		codexModel:          cfg.CodexModel,
+		openCursor:          cfg.OpenCursor,
+		openClaude:          cfg.OpenClaude,
+		openCodex:           cfg.OpenCodex,
+		openCodexWithModel:  cfg.OpenCodexWithModel,
+		openClaudeWithModel: cfg.OpenClaudeWithModel,
+		spinner:             s,
+		selected:            make(map[int]bool),
+		wsExpanded:          make(map[int]bool),
 	}
 }
 
@@ -400,6 +441,10 @@ func (m *AppModel) refreshConfig() error {
 	m.terminal = cfg.Terminal
 	m.defaultEditor = cfg.DefaultEditor
 	m.claudeTokens = cfg.ClaudeTokens
+	m.codexTokens = cfg.CodexTokens
+	m.litellmBaseURL = cfg.LiteLLMBaseURL
+	m.claudeModel = cfg.ClaudeModel
+	m.codexModel = cfg.CodexModel
 	return nil
 }
 
@@ -536,6 +581,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = viewSelector
 		m.clearScan()
 		return m, nil
+
+	case modelFetchDoneMsg:
+		return m.finishModelFetch(msg)
 	}
 
 	switch m.view {
@@ -553,16 +601,30 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAddRoot(msg)
 	case viewEditorPick:
 		return m.updateEditorPick(msg)
+	case viewCodexTokenPick:
+		return m.updateCodexTokenPick(msg)
 	case viewClaudeTokenPick:
 		return m.updateClaudeTokenPick(msg)
+	case viewClaudeModelPick, viewCodexModelPick:
+		return m.updateModelPick(msg)
+	case viewModelLoading:
+		return m.updateModelLoading(msg)
 	case viewSettings:
 		return m.updateSettings(msg)
+	case viewCodexTokens:
+		return m.updateCodexTokens(msg)
 	case viewClaudeTokens:
 		return m.updateClaudeTokens(msg)
+	case viewCodexTokenName:
+		return m.updateCodexTokenName(msg)
 	case viewClaudeTokenName:
 		return m.updateClaudeTokenName(msg)
+	case viewCodexTokenValue:
+		return m.updateCodexTokenValue(msg)
 	case viewClaudeTokenValue:
 		return m.updateClaudeTokenValue(msg)
+	case viewSettingsInput:
+		return m.updateSettingsInput(msg)
 	}
 
 	return m, nil
@@ -1040,6 +1102,10 @@ func (m AppModel) updateNaming(msg tea.Msg) (tea.Model, tea.Cmd) {
 // editor in settings, runs that editor immediately and skips the view.
 func (m AppModel) beginEditorPick(p editorPick) (tea.Model, tea.Cmd) {
 	switch m.defaultEditor {
+	case editorPickCodex:
+		p.cursor = 2
+		m.editorPick = p
+		return m.runEditorPick()
 	case editorPickClaude:
 		p.cursor = 1
 		m.editorPick = p
@@ -1058,6 +1124,7 @@ func (m AppModel) beginEditorPick(p editorPick) (tea.Model, tea.Cmd) {
 const (
 	editorPickCursor = "cursor"
 	editorPickClaude = "claude"
+	editorPickCodex  = "codex"
 )
 
 func (m AppModel) updateEditorPick(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1078,11 +1145,14 @@ func (m AppModel) updateEditorPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.editorPick.cursor--
 		}
 	case "down", "j":
-		if m.editorPick.cursor < 1 {
+		if m.editorPick.cursor < 2 {
 			m.editorPick.cursor++
 		}
 	case "c", "C":
 		m.editorPick.cursor = 0
+		return m.runEditorPick()
+	case "x", "X":
+		m.editorPick.cursor = 2
 		return m.runEditorPick()
 	case "l", "L":
 		m.editorPick.cursor = 1
@@ -1098,6 +1168,20 @@ func (m AppModel) runEditorPick() (tea.Model, tea.Cmd) {
 	pick := m.editorPick
 	m.view = viewMain
 
+	if pick.cursor == 2 {
+		if err := m.refreshConfig(); err != nil {
+			m.statusMsg = err.Error()
+			m.statusErr = true
+			return m, nil
+		}
+		if len(m.codexTokens) > 0 {
+			m.codexTokenPick = codexTokenPick{editorPick: pick}
+			m.view = viewCodexTokenPick
+			return m, nil
+		}
+		return m.beginModelPick(pick, "", "codex")
+	}
+
 	if pick.cursor == 1 {
 		if err := m.refreshConfig(); err != nil {
 			m.statusMsg = err.Error()
@@ -1109,7 +1193,7 @@ func (m AppModel) runEditorPick() (tea.Model, tea.Cmd) {
 			m.view = viewClaudeTokenPick
 			return m, nil
 		}
-		return m.launchClaude(pick, "")
+		return m.beginModelPick(pick, "", "claude")
 	}
 
 	if err := m.openCursor(pick.cursorPath); err != nil {
@@ -1149,20 +1233,23 @@ func (m AppModel) updateClaudeTokenPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.claudeTokenPick.cursor < len(m.claudeTokens) {
 			tokenName = m.claudeTokens[m.claudeTokenPick.cursor].Name
 		}
-		return m.launchClaude(m.claudeTokenPick.editorPick, tokenName)
+		return m.beginModelPick(m.claudeTokenPick.editorPick, tokenName, "claude")
 	}
 
 	return m, nil
 }
 
-func (m AppModel) launchClaude(pick editorPick, tokenName string) (tea.Model, tea.Cmd) {
+func (m AppModel) launchClaude(pick editorPick, tokenName, model string) (tea.Model, tea.Cmd) {
 	m.view = viewMain
-	if m.openClaude == nil {
-		m.statusMsg = "Claude launcher is not configured"
-		m.statusErr = true
-		return m, loadWorkspacesCmd
+	var err error
+	if m.openClaudeWithModel != nil {
+		err = m.openClaudeWithModel(pick.primaryPath, pick.extraPaths, tokenName, model)
+	} else if m.openClaude != nil {
+		err = m.openClaude(pick.primaryPath, pick.extraPaths, tokenName)
+	} else {
+		err = fmt.Errorf("Claude launcher is not configured")
 	}
-	if err := m.openClaude(pick.primaryPath, pick.extraPaths, tokenName); err != nil {
+	if err != nil {
 		m.statusMsg = fmt.Sprintf("Claude: %v", err)
 		m.statusErr = true
 	} else if tokenName != "" {
@@ -1189,6 +1276,7 @@ func (m AppModel) renderEditorPick() string {
 	}{
 		{"Cursor", "open as multi-root .code-workspace", "c"},
 		{"Claude Code", "claude in primary folder + --add-dir for extras", "l"},
+		{"Codex CLI", "codex in primary folder + --add-dir for extras", "x"},
 	}
 
 	for i, opt := range options {
@@ -1212,6 +1300,7 @@ func (m AppModel) renderEditorPick() string {
 		{"↵", "open"},
 		{"c", "Cursor"},
 		{"l", "Claude"},
+		{"x", "Codex"},
 		{"esc", "back"},
 	}
 	s = append(s, "  "+renderHelp(items))
@@ -1280,7 +1369,7 @@ func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingsCursor--
 		}
 	case "down", "j":
-		if m.settingsCursor < 2 {
+		if m.settingsCursor < 6 {
 			m.settingsCursor++
 		}
 	case "left", "h":
@@ -1288,6 +1377,36 @@ func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "right", "l", "tab", " ":
 		m.cycleSettingsValue(1)
 	case "enter":
+		if m.settingsCursor >= 4 {
+			if m.settingsCursor >= 5 && strings.TrimSpace(m.litellmBaseURL) != "" {
+				return m.beginSettingsModelPick(m.settingsCursor)
+			}
+			value := m.litellmBaseURL
+			placeholder := "https://litellm.example.com"
+			label := "LiteLLM base URL"
+			switch m.settingsCursor {
+			case 5:
+				value, placeholder, label = m.claudeModel, "claude-sonnet", "Default Claude model"
+			case 6:
+				value, placeholder, label = m.codexModel, "gpt-5", "Default Codex model"
+			}
+			ti := newStyledInput(placeholder)
+			ti.SetValue(value)
+			ti.Width = 72
+			ti.Focus()
+			m.settingsInput = ti
+			m.settingsInputKind = m.settingsCursor
+			m.view = viewSettingsInput
+			m.statusMsg = label
+			return m, textinput.Blink
+		}
+		if m.settingsCursor == 3 {
+			m.view = viewCodexTokens
+			m.confirmingToken = false
+			m.statusMsg = ""
+			m.tokenCursor = 0
+			return m, nil
+		}
 		if m.settingsCursor == 2 {
 			m.view = viewClaudeTokens
 			m.confirmingToken = false
@@ -1306,6 +1425,9 @@ func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cfg.Terminal = m.settingsTerminal
 		cfg.DefaultEditor = m.settingsEditor
+		cfg.LiteLLMBaseURL = m.litellmBaseURL
+		cfg.ClaudeModel = m.claudeModel
+		cfg.CodexModel = m.codexModel
 		if err := config.Save(cfg); err != nil {
 			m.statusMsg = err.Error()
 			m.statusErr = true
@@ -1320,6 +1442,42 @@ func (m AppModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m AppModel) updateSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.Type {
+		case tea.KeyEsc:
+			m.view = viewSettings
+			m.statusMsg = ""
+			return m, nil
+		case tea.KeyEnter:
+			value := strings.TrimSpace(m.settingsInput.Value())
+			switch m.settingsInputKind {
+			case 4:
+				m.litellmBaseURL = value
+			case 5:
+				m.claudeModel = value
+			case 6:
+				m.codexModel = value
+			}
+			cfg, err := config.Load()
+			if err == nil {
+				cfg.LiteLLMBaseURL, cfg.ClaudeModel, cfg.CodexModel = m.litellmBaseURL, m.claudeModel, m.codexModel
+				err = config.Save(cfg)
+			}
+			if err != nil {
+				m.statusMsg, m.statusErr = err.Error(), true
+			} else {
+				m.statusMsg, m.statusErr = "Settings saved", false
+			}
+			m.view = viewSettings
+			return m, nil
+		}
+	}
+	var cmd tea.Cmd
+	m.settingsInput, cmd = m.settingsInput.Update(msg)
+	return m, cmd
 }
 
 func (m *AppModel) cycleSettingsValue(delta int) {
@@ -1378,6 +1536,10 @@ func (m AppModel) renderSettings() string {
 		{"Terminal", settingsTerminalOptions, m.settingsTerminal, "", ""},
 		{"Default editor", settingsEditorOptions, m.settingsEditor, "", ""},
 		{"Claude tokens", nil, "", fmt.Sprintf("%d saved", len(m.claudeTokens)), "press enter to add, remove, or review saved token names"},
+		{"Codex tokens", nil, "", fmt.Sprintf("%d saved", len(m.codexTokens)), "press enter to add, remove, or review saved token names"},
+		{"LiteLLM base URL", nil, m.litellmBaseURL, m.litellmBaseURL, "OpenAI-compatible proxy URL; /v1 is optional"},
+		{"Default Claude model", nil, m.claudeModel, m.claudeModel, "used as the initial choice when the proxy list contains it"},
+		{"Default Codex model", nil, m.codexModel, m.codexModel, "used as the initial choice when the proxy list contains it"},
 	}
 
 	for i, row := range rows {
@@ -1707,19 +1869,50 @@ func (m AppModel) View() string {
 		return m.renderAddRoot()
 	case viewEditorPick:
 		return m.renderEditorPick()
+	case viewCodexTokenPick:
+		return m.renderCodexTokenPick()
 	case viewClaudeTokenPick:
 		return m.renderClaudeTokenPick()
+	case viewClaudeModelPick, viewCodexModelPick:
+		return m.renderModelPick()
+	case viewModelLoading:
+		return appPadding.Render(appTitleStyle.Render(" CURSPACE ") + "  " + appSubtitleStyle.Render("fetching models") + "\n\n  " + m.modelPick.provider + " models are loading...\n\n  " + appHelpDescStyle.Render("esc cancel"))
 	case viewSettings:
 		return m.renderSettings()
+	case viewCodexTokens:
+		return m.renderCodexTokens()
 	case viewClaudeTokens:
 		return m.renderClaudeTokens()
+	case viewCodexTokenName:
+		return m.renderCodexTokenName()
 	case viewClaudeTokenName:
 		return m.renderClaudeTokenName()
+	case viewCodexTokenValue:
+		return m.renderCodexTokenValue()
 	case viewClaudeTokenValue:
 		return m.renderClaudeTokenValue()
+	case viewSettingsInput:
+		return m.renderSettingsInput()
 	}
 
 	return ""
+}
+
+func (m AppModel) renderSettingsInput() string {
+	label := "LiteLLM base URL"
+	if m.settingsInputKind == 5 {
+		label = "Default Claude model"
+	} else if m.settingsInputKind == 6 {
+		label = "Default Codex model"
+	}
+	lines := []string{
+		appTitleStyle.Render(" CURSPACE ") + "  " + appSubtitleStyle.Render("settings"),
+		"",
+		inputBoxStyle.Render(fmt.Sprintf("%s\n\n%s", inputLabelStyle.Render(label+":"), m.settingsInput.View())),
+		"",
+		"  " + renderHelp([]struct{ key, desc string }{{"↵", "save"}, {"esc", "cancel"}}),
+	}
+	return appPadding.Render(strings.Join(lines, "\n"))
 }
 
 // ── Main view ─────────────────────────────────────────────────────

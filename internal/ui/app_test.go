@@ -284,3 +284,181 @@ func TestClaudeTokenManagerSavesTokenFromInputs(t *testing.T) {
 		t.Fatalf("saved token value: got %q, want sk-ant-work", value)
 	}
 }
+
+func TestCodexEditorSelection(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, mode := range []string{"hotkey", "navigation", "default"} {
+		t.Run(mode, func(t *testing.T) {
+			called := false
+			m := NewAppModel(AppConfig{
+				OpenCodex: func(primary string, extras []string, tokenName string) error {
+					called = true
+					if primary != "/projects/app" || !slices.Equal(extras, []string{"/projects/lib"}) {
+						t.Fatalf("unexpected paths: %q %v", primary, extras)
+					}
+					return nil
+				},
+			})
+			pick := editorPick{label: "app", primaryPath: "/projects/app", extraPaths: []string{"/projects/lib"}}
+			var model tea.Model
+			if mode == "default" {
+				m.defaultEditor = "codex"
+				model, _ = m.beginEditorPick(pick)
+			} else {
+				model, _ = m.beginEditorPick(pick)
+				m = model.(AppModel)
+				if mode == "navigation" {
+					for range 2 {
+						model, _ = m.updateEditorPick(tea.KeyMsg{Type: tea.KeyDown})
+						m = model.(AppModel)
+					}
+					model, _ = m.updateEditorPick(tea.KeyMsg{Type: tea.KeyEnter})
+				} else {
+					model, _ = m.updateEditorPick(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+				}
+			}
+			done := model.(AppModel)
+			if !called || done.statusErr || done.view != viewMain {
+				t.Fatalf("launch failed: called=%v status=%s view=%v", called, done.statusMsg, done.view)
+			}
+		})
+	}
+}
+
+func TestCodexLauncherUnavailable(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewAppModel(AppConfig{DefaultEditor: "codex"})
+	model, _ := m.beginEditorPick(editorPick{primaryPath: "/projects/app"})
+	done := model.(AppModel)
+	if !done.statusErr || !strings.Contains(done.statusMsg, "not configured") {
+		t.Fatalf("unexpected status: %s", done.statusMsg)
+	}
+}
+
+func TestCodexTokenPickPassesSelectedToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	if err := config.Save(&config.Config{
+		Roots:       []string{},
+		MaxDepth:    10,
+		CodexTokens: []config.CodexToken{{Name: "work", Value: "sk-test-work"}},
+	}); err != nil {
+		t.Fatalf("Save config failed: %v", err)
+	}
+
+	var gotToken string
+	m := NewAppModel(AppConfig{
+		OpenCodex: func(primaryPath string, extraPaths []string, tokenName string) error {
+			gotToken = tokenName
+			return nil
+		},
+	})
+	m.editorPick = editorPick{
+		label:       "svc",
+		primaryPath: "/projects/svc",
+		cursor:      2,
+	}
+
+	model, _ := m.runEditorPick()
+	picking := model.(AppModel)
+	if picking.view != viewCodexTokenPick {
+		t.Fatalf("expected Codex token picker, got %v", picking.view)
+	}
+
+	model, _ = picking.updateCodexTokenPick(tea.KeyMsg{Type: tea.KeyEnter})
+	done := model.(AppModel)
+	if gotToken != "work" {
+		t.Fatalf("selected token: got %q, want work", gotToken)
+	}
+	if done.statusErr {
+		t.Fatalf("expected successful status, got %q", done.statusMsg)
+	}
+}
+
+func TestSettingsCanOpenCodexTokenManager(t *testing.T) {
+	m := NewAppModel(AppConfig{
+		CodexTokens: []config.CodexToken{{Name: "work", Value: "sk-test-work"}},
+	})
+	m.view = viewSettings
+	m.settingsCursor = 3
+
+	model, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+	got := model.(AppModel)
+
+	if got.view != viewCodexTokens {
+		t.Fatalf("expected Codex token manager, got %v", got.view)
+	}
+	if !strings.Contains(got.renderCodexTokens(), "work") {
+		t.Fatal("expected token manager to render saved token name")
+	}
+}
+
+func TestCodexTokenManagerSavesTokenFromInputs(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	m := NewAppModel(AppConfig{})
+	m.view = viewCodexTokenName
+	m.tokenNameInput = newStyledInput("work")
+	m.tokenNameInput.SetValue("work")
+
+	model, _ := m.updateCodexTokenName(tea.KeyMsg{Type: tea.KeyEnter})
+	valueModel := model.(AppModel)
+	if valueModel.view != viewCodexTokenValue {
+		t.Fatalf("expected token value input, got %v", valueModel.view)
+	}
+
+	valueModel.tokenValueInput.SetValue("sk-test-work")
+	model, _ = valueModel.updateCodexTokenValue(tea.KeyMsg{Type: tea.KeyEnter})
+	done := model.(AppModel)
+
+	if done.view != viewCodexTokens {
+		t.Fatalf("expected token manager after save, got %v", done.view)
+	}
+	if len(done.codexTokens) != 1 || done.codexTokens[0].Name != "work" {
+		t.Fatalf("expected saved token in model, got %#v", done.codexTokens)
+	}
+
+	value, err := config.CodexTokenValue("work")
+	if err != nil {
+		t.Fatalf("CodexTokenValue failed: %v", err)
+	}
+	if value != "sk-test-work" {
+		t.Fatalf("saved token value: got %q, want sk-test-work", value)
+	}
+}
+
+func TestDefaultCodexTokenPickerCurrentLoginAndCancel(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := config.SetCodexToken("work", "test-secret"); err != nil {
+		t.Fatal(err)
+	}
+	for _, cancel := range []bool{false, true} {
+		called := false
+		m := NewAppModel(AppConfig{DefaultEditor: "codex", OpenCodex: func(primary string, extras []string, token string) error {
+			called = true
+			if token != "" {
+				t.Fatalf("expected current login, got %q", token)
+			}
+			return nil
+		}})
+		model, _ := m.beginEditorPick(editorPick{primaryPath: "/projects/app"})
+		m = model.(AppModel)
+		if m.view != viewCodexTokenPick {
+			t.Fatalf("default skipped token picker: %v", m.view)
+		}
+		if strings.Contains(m.renderCodexTokenPick(), "test-secret") {
+			t.Fatal("picker reveals token value")
+		}
+		if cancel {
+			model, _ = m.updateCodexTokenPick(tea.KeyMsg{Type: tea.KeyEsc})
+		} else {
+			model, _ = m.updateCodexTokenPick(tea.KeyMsg{Type: tea.KeyDown})
+			m = model.(AppModel)
+			model, _ = m.updateCodexTokenPick(tea.KeyMsg{Type: tea.KeyEnter})
+		}
+		if called == cancel || model.(AppModel).view != viewMain {
+			t.Fatal("incorrect cancel/current-login behavior")
+		}
+	}
+}

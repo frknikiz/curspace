@@ -50,7 +50,7 @@ var workspaceListCmd = &cobra.Command{
 
 var workspaceOpenCmd = &cobra.Command{
 	Use:   "open <name>",
-	Short: "Open a saved workspace in Cursor or Claude",
+	Short: "Open a saved workspace in Cursor, Claude Code, or Codex CLI",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateEditor(workspaceOpenEditor); err != nil {
@@ -105,7 +105,7 @@ var workspaceRenameCmd = &cobra.Command{
 }
 
 func init() {
-	workspaceOpenCmd.Flags().StringVarP(&workspaceOpenEditor, "editor", "e", editorCursor, "Editor to launch: cursor or claude")
+	workspaceOpenCmd.Flags().StringVarP(&workspaceOpenEditor, "editor", "e", editorCursor, "Editor to launch: cursor, claude, or codex")
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceOpenCmd)
 	workspaceCmd.AddCommand(workspaceDeleteCmd)

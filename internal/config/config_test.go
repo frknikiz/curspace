@@ -289,3 +289,56 @@ func TestClaudeTokenValueAndRemove(t *testing.T) {
 		t.Fatal("expected removed token lookup to fail")
 	}
 }
+
+func TestSetCodexTokenAddsAndUpdatesByName(t *testing.T) {
+	// Given
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// When
+	if err := SetCodexToken("work", "first"); err != nil {
+		t.Fatalf("SetCodexToken add failed: %v", err)
+	}
+	if err := SetCodexToken("work", "second"); err != nil {
+		t.Fatalf("SetCodexToken update failed: %v", err)
+	}
+
+	// Then
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.CodexTokens) != 1 {
+		t.Fatalf("CodexTokens length: got %d, want 1", len(cfg.CodexTokens))
+	}
+	if cfg.CodexTokens[0].Value != "second" {
+		t.Fatalf("Codex token value: got %q, want second", cfg.CodexTokens[0].Value)
+	}
+}
+
+func TestCodexTokenValueAndRemove(t *testing.T) {
+	// Given
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	if err := SetCodexToken("personal", "sk-ant-personal"); err != nil {
+		t.Fatalf("SetCodexToken failed: %v", err)
+	}
+
+	// When
+	value, err := CodexTokenValue("personal")
+
+	// Then
+	if err != nil {
+		t.Fatalf("CodexTokenValue failed: %v", err)
+	}
+	if value != "sk-ant-personal" {
+		t.Fatalf("CodexTokenValue: got %q, want sk-ant-personal", value)
+	}
+
+	if err := RemoveCodexToken("personal"); err != nil {
+		t.Fatalf("RemoveCodexToken failed: %v", err)
+	}
+	if _, err := CodexTokenValue("personal"); err == nil {
+		t.Fatal("expected removed token lookup to fail")
+	}
+}

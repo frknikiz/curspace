@@ -29,3 +29,12 @@ func TestBuildShellCommandWithTokenName(t *testing.T) {
 		t.Fatalf("command should not include a raw token value: %s", got)
 	}
 }
+
+func TestBuildShellCommandWithModelAndBaseURL(t *testing.T) {
+	got := buildShellCommand("/projects/app", nil, "", "claude-sonnet", "https://llm.example/v1")
+	for _, want := range []string{"ANTHROPIC_BASE_URL='https://llm.example/v1'", "claude --model 'claude-sonnet'"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("command missing %q: %s", want, got)
+		}
+	}
+}
