@@ -1247,7 +1247,7 @@ func (m AppModel) launchClaude(pick editorPick, tokenName, model string) (tea.Mo
 	} else if m.openClaude != nil {
 		err = m.openClaude(pick.primaryPath, pick.extraPaths, tokenName)
 	} else {
-		err = fmt.Errorf("Claude launcher is not configured")
+		err = fmt.Errorf("claude launcher is not configured")
 	}
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Claude: %v", err)
@@ -1900,9 +1900,10 @@ func (m AppModel) View() string {
 
 func (m AppModel) renderSettingsInput() string {
 	label := "LiteLLM base URL"
-	if m.settingsInputKind == 5 {
+	switch m.settingsInputKind {
+	case 5:
 		label = "Default Claude model"
-	} else if m.settingsInputKind == 6 {
+	case 6:
 		label = "Default Codex model"
 	}
 	lines := []string{

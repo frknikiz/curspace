@@ -44,9 +44,9 @@ func Fetch(ctx context.Context, baseURL, token string) ([]Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetching LiteLLM models: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("LiteLLM model request returned %s", resp.Status)
+		return nil, fmt.Errorf("litellm model request returned %s", resp.Status)
 	}
 
 	var payload modelsResponse
@@ -67,7 +67,7 @@ func Fetch(ctx context.Context, baseURL, token string) ([]Model, error) {
 		models = append(models, model)
 	}
 	if len(models) == 0 {
-		return nil, fmt.Errorf("LiteLLM returned no models")
+		return nil, fmt.Errorf("litellm returned no models")
 	}
 	return models, nil
 }
@@ -75,7 +75,7 @@ func Fetch(ctx context.Context, baseURL, token string) ([]Model, error) {
 func modelsEndpoint(baseURL string) (string, error) {
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
-		return "", fmt.Errorf("LiteLLM base URL is not configured")
+		return "", fmt.Errorf("litellm base URL is not configured")
 	}
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {

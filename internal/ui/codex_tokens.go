@@ -55,7 +55,7 @@ func (m AppModel) launchCodex(pick editorPick, tokenName, model string) (tea.Mod
 	} else if m.openCodex != nil {
 		err = m.openCodex(pick.primaryPath, pick.extraPaths, tokenName)
 	} else {
-		err = fmt.Errorf("Codex launcher is not configured")
+		err = fmt.Errorf("codex launcher is not configured")
 	}
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Codex: %v", err)

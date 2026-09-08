@@ -37,7 +37,7 @@ func TestChooseCodexTokenName(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { f.Close() })
+		t.Cleanup(func() { _ = f.Close() })
 		if _, err = f.WriteString(tc.input); err != nil {
 			t.Fatal(err)
 		}
