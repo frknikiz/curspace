@@ -19,6 +19,7 @@ type modelPick struct {
 	cursor       int
 	search       string
 	settingsKind int // 5 = Claude default, 6 = Codex default
+	scrollTop    int
 }
 
 func (m AppModel) beginModelPick(pick editorPick, tokenName, provider string) (tea.Model, tea.Cmd) {
@@ -129,6 +130,7 @@ func (m AppModel) finishModelFetch(msg modelFetchDoneMsg) (tea.Model, tea.Cmd) {
 			break
 		}
 	}
+	m.ensureModelVisible()
 	if msg.provider == "codex" {
 		m.view = viewCodexModelPick
 	} else {
@@ -164,10 +166,12 @@ func (m AppModel) updateModelPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.modelPick.cursor > 0 {
 			m.modelPick.cursor--
+			m.ensureModelVisible()
 		}
 	case "down", "j":
 		if m.modelPick.cursor < len(m.filteredModelIndexes())-1 {
 			m.modelPick.cursor++
+			m.ensureModelVisible()
 		}
 	case "enter":
 		filtered := m.filteredModelIndexes()
@@ -204,13 +208,25 @@ func (m AppModel) updateModelPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if km.Type == tea.KeyRunes {
 			m.modelPick.search += string(km.Runes)
 			m.modelPick.cursor = 0
+			m.modelPick.scrollTop = 0
 		} else if km.Type == tea.KeyBackspace && m.modelPick.search != "" {
 			runes := []rune(m.modelPick.search)
 			m.modelPick.search = string(runes[:len(runes)-1])
 			m.modelPick.cursor = 0
+			m.modelPick.scrollTop = 0
 		}
 	}
 	return m, nil
+}
+
+func (m *AppModel) ensureModelVisible() {
+	visible := max(5, m.height-13)
+	if m.modelPick.cursor < m.modelPick.scrollTop {
+		m.modelPick.scrollTop = m.modelPick.cursor
+	}
+	if m.modelPick.cursor >= m.modelPick.scrollTop+visible {
+		m.modelPick.scrollTop = m.modelPick.cursor - visible + 1
+	}
 }
 
 func (m AppModel) filteredModelIndexes() []int {
@@ -233,7 +249,14 @@ func (m AppModel) renderModelPick() string {
 	filtered := m.filteredModelIndexes()
 	lines = append(lines, "  "+appDetailStyle.Render("Search: ")+appNameStyle.Render(m.modelPick.search))
 	lines = append(lines, "")
-	for i, index := range filtered {
+	visible := max(5, m.height-13)
+	start := min(m.modelPick.scrollTop, len(filtered))
+	end := min(start+visible, len(filtered))
+	if start > 0 {
+		lines = append(lines, "  "+selScrollStyle.Render(fmt.Sprintf("▲ %d more", start)))
+	}
+	for i := start; i < end; i++ {
+		index := filtered[i]
 		model := m.modelPick.models[index]
 		cursor := "  "
 		name := appNameStyle.Render(model.ID)
@@ -242,6 +265,9 @@ func (m AppModel) renderModelPick() string {
 			name = appSelectedNameStyle.Render(model.ID)
 		}
 		lines = append(lines, "  "+cursor+name)
+	}
+	if remaining := len(filtered) - end; remaining > 0 {
+		lines = append(lines, "  "+selScrollStyle.Render(fmt.Sprintf("▼ %d more", remaining)))
 	}
 	lines = append(lines, "", "  "+renderHelp([]struct{ key, desc string }{{"type", "search"}, {"↑↓", "navigate"}, {"↵", "select"}, {"esc", "cancel"}}))
 	return appPadding.Render(strings.Join(lines, "\n"))
